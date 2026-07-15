@@ -12,6 +12,8 @@ async function callGarminBackend<T>(endpoint: string, body: unknown): Promise<T>
     headers: {
       "Content-Type": "application/json",
       "X-Internal-Secret": process.env.INTERNAL_API_SECRET ?? "",
+      // Bypass Vercel Deployment Protection for internal calls between serverless functions
+      "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET ?? "",
     },
     body: JSON.stringify(body),
   });
