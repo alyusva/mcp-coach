@@ -1,16 +1,7 @@
 {
   "functions": {
     "api/**/*.py": {
-      "runtime": "python3.12",
       "maxDuration": 30
     }
-  },
-  "headers": [
-    {
-      "source": "/api/garmin/(.*)",
-      "headers": [
-        { "key": "X-Robots-Tag", "value": "noindex" }
-      ]
-    }
-  ]
+  }
 }
