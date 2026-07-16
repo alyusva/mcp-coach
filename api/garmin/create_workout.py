@@ -11,7 +11,7 @@ from pathlib import Path
 
 # Allow importing _session from the same package
 sys.path.insert(0, str(Path(__file__).parent))
-from _session import get_garmin_client  # noqa: E402
+from _session import get_garmin_client, save_session  # noqa: E402
 
 
 # ─── Workout builder helpers ────────────────────────────────────────────────
@@ -203,6 +203,7 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             client.schedule_workout(workout_id, scheduled_date)
+            save_session(client)  # persist any token refresh garth did automatically
 
             self._json({
                 "workoutId": workout_id,

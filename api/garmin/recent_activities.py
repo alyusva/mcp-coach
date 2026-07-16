@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _session import get_garmin_client  # noqa: E402
+from _session import get_garmin_client, save_session  # noqa: E402
 
 
 def mps_to_min_per_km(mps: float | None) -> float | None:
@@ -48,6 +48,7 @@ class handler(BaseHTTPRequestHandler):
 
             client = get_garmin_client()
             raw = client.get_activities(0, limit)
+            save_session(client)  # persist any token refresh garth did automatically
             activities = [normalize(a) for a in (raw or [])]
 
             self._json(activities)
