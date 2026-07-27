@@ -62,16 +62,18 @@ function weekLabel(year: number, week: number) {
 }
 
 export async function getTrainingContext(): Promise<string> {
-  const [zonas, objetivos, plan] = await Promise.all([
+  const [zonas, objetivos, planGlobal, planActual] = await Promise.all([
     readFile("config/zonas.md"),
     readFile("config/objetivos.md"),
+    readFile("plan/plan-global.md").catch(() => ({ content: "_Sin plan global_" })),
     readFile("plan/semana-actual.md"),
   ]);
 
   return [
     `# ZONAS DE ENTRENAMIENTO\n\n${zonas.content}`,
     `# OBJETIVOS\n\n${objetivos.content}`,
-    `# PLAN SEMANA ACTUAL\n\n${plan.content}`,
+    `# PLAN GLOBAL (9 semanas)\n\n${planGlobal.content}`,
+    `# PLAN SEMANA ACTUAL\n\n${planActual.content}`,
   ].join("\n\n---\n\n");
 }
 
