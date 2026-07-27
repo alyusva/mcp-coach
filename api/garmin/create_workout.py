@@ -35,7 +35,7 @@ NO_TARGET = {
 
 
 def parse_pace_to_mps(pace_str: str) -> float:
-    """'3:58 /km' → speed in m/s."""
+    """'3:58 /km' → speed in m/s. Garmin pace.zone expects m/s and displays as pace."""
     pace = pace_str.replace("/km", "").replace("/mile", "").strip()
     parts = pace.split(":")
     total_secs = int(parts[0]) * 60 + (int(parts[1]) if len(parts) > 1 else 0)
@@ -96,25 +96,23 @@ def build_target(target: dict | None) -> dict:
         }
 
     if t == "pace":
+        unit = "/km" if "/km" in raw else "/mile" if "/mile" in raw else "/km"
         if "-" in raw.replace("/km", "").replace("/mile", ""):
-            # Split on "-" that separates two pace values (not inside "3:58")
-            # Strategy: strip unit, split on space-dash-space or just "-"
-            unit = "/km" if "/km" in raw else "/mile" if "/mile" in raw else "/km"
             clean = raw.replace(unit, "").strip()
             parts = clean.split("-", 1)
-            # Faster pace (lower number) → higher speed
-            faster_mps = parse_pace_to_mps(parts[0].strip() + " " + unit)
-            slower_mps = parse_pace_to_mps(parts[1].strip() + " " + unit)
-            lo_speed = min(faster_mps, slower_mps)
-            hi_speed = max(faster_mps, slower_mps)
+            # Faster pace = higher m/s (e.g. 3:59 = 4.184 m/s), slower = lower (4:16 = 3.906 m/s)
+            mps_a = parse_pace_to_mps(parts[0].strip() + " " + unit)
+            mps_b = parse_pace_to_mps(parts[1].strip() + " " + unit)
+            lo_speed = min(mps_a, mps_b)
+            hi_speed = max(mps_a, mps_b)
         else:
-            spd = parse_pace_to_mps(raw)
-            lo_speed = spd * 0.97
-            hi_speed = spd * 1.03
+            mps = parse_pace_to_mps(raw)
+            lo_speed = mps * 0.97
+            hi_speed = mps * 1.03
         return {
-            "targetType": {"workoutTargetTypeId": 2, "workoutTargetTypeKey": "speed.zone"},
-            "targetValueOne": lo_speed,
-            "targetValueTwo": hi_speed,
+            "targetType": {"workoutTargetTypeId": 6, "workoutTargetTypeKey": "pace.zone"},
+            "targetValueOne": hi_speed,  # faster m/s → displayed as faster pace (e.g. 3:59)
+            "targetValueTwo": lo_speed,  # slower m/s → displayed as slower pace (e.g. 4:16)
         }
 
     return NO_TARGET.copy()

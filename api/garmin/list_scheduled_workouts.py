@@ -77,7 +77,8 @@ def get_calendar_workouts(client, start: date, end: date) -> list[dict]:
 
     items_by_id: dict[int, dict] = {}
     for year, month in months_needed:
-        resp = client.connectapi(f"/calendar-service/year/{year}/month/{month}")
+        # Garmin's calendar-service uses 0-indexed months (January=0), unlike date.month (1-12)
+        resp = client.connectapi(f"/calendar-service/year/{year}/month/{month - 1}")
         for item in (resp or {}).get("calendarItems", []):
             if item.get("itemType") != "workout":
                 continue
