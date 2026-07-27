@@ -9,6 +9,8 @@ import {
 import {
   createGarminWorkout,
   getGarminRecentActivities,
+  getGarminScheduledWorkouts,
+  deleteGarminWorkout,
 } from "@/lib/garmin-client";
 
 const GarminStepSchema: z.ZodType<object> = z.lazy(() =>
@@ -87,6 +89,35 @@ const mcpHandler = createMcpHandler(
         const activities = await getGarminRecentActivities(limit);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(activities, null, 2) }],
+        };
+      },
+    );
+
+    server.tool(
+      "get_garmin_scheduled_workouts",
+      "Lista los entrenamientos programados en Garmin Connect para un rango de fechas, con el detalle completo de cada bloque: tipo de paso, distancia/duración y objetivo de ritmo o FC.",
+      {
+        startDate: z.string().describe("Fecha inicio ISO YYYY-MM-DD"),
+        endDate: z.string().describe("Fecha fin ISO YYYY-MM-DD"),
+      },
+      async ({ startDate, endDate }) => {
+        const workouts = await getGarminScheduledWorkouts(startDate, endDate);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(workouts, null, 2) }],
+        };
+      },
+    );
+
+    server.tool(
+      "delete_garmin_workout",
+      "Elimina un entrenamiento de Garmin Connect por su ID, borrándolo también del calendario. Usar cuando haya duplicados o cuando haya que reemplazar un workout incorrecto.",
+      {
+        workoutId: z.number().int().describe("ID numérico del workout en Garmin Connect"),
+      },
+      async ({ workoutId }) => {
+        const result = await deleteGarminWorkout(workoutId);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         };
       },
     );

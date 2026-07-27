@@ -62,10 +62,44 @@ export interface GarminActivity {
   avgPaceMinPerKm: number | null;
 }
 
+export interface WorkoutStep {
+  type: string;
+  duration_or_distance?: string;
+  target?: string;
+  repeat?: number;
+  steps?: WorkoutStep[];
+}
+
+export interface ScheduledWorkout {
+  workoutId: number;
+  name: string;
+  sport: string;
+  scheduledDate: string;
+  steps: WorkoutStep[];
+}
+
+export interface DeleteWorkoutResult {
+  deleted: boolean;
+  workoutId: number;
+  message: string;
+}
+
 export async function createGarminWorkout(params: CreateWorkoutParams): Promise<CreateWorkoutResult> {
   return callGarminBackend<CreateWorkoutResult>("create_workout", params);
 }
 
 export async function getGarminRecentActivities(limit: number): Promise<GarminActivity[]> {
   return callGarminBackend<GarminActivity[]>("recent_activities", { limit });
+}
+
+export async function getGarminScheduledWorkouts(startDate: string, endDate: string): Promise<ScheduledWorkout[]> {
+  const result = await callGarminBackend<{ workouts: ScheduledWorkout[]; count: number }>(
+    "list_scheduled_workouts",
+    { startDate, endDate },
+  );
+  return result.workouts;
+}
+
+export async function deleteGarminWorkout(workoutId: number): Promise<DeleteWorkoutResult> {
+  return callGarminBackend<DeleteWorkoutResult>("delete_workout", { workoutId });
 }
