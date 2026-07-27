@@ -19,29 +19,29 @@ const SYSTEM_PROMPT = `Eres el entrenador AI automatizado de Álvaro para su pre
 Ejecutas cada lunes por la mañana. Tu misión en cada ejecución:
 1. Leer el contexto completo: zonas, objetivos, plan global y plan de la semana que acaba de terminar.
 2. Leer las actividades de Garmin de los últimos 14 días.
-3. Registrar en el log cada sesión de running de la semana pasada (una entrada por sesión con fecha, tipo, distancia, FC media, ritmo, valoración breve).
+3. Registrar en el log cada sesión de running de la semana pasada — UNA entrada por sesión, sin repetir sesiones ya registradas.
 4. Analizar qué se hizo vs qué estaba planificado. Si la tirada larga se saltó, notarlo explícitamente.
-5. Generar el plan de la semana siguiente siguiendo la estructura del plan global. Ajustar si hay fatiga acumulada o sesiones perdidas (regla: no recuperar volumen, semana nueva en limpio).
+5. Generar el plan de la semana siguiente siguiendo ESTRICTAMENTE la estructura del plan global. Solo puedes desviar la sesión de calidad si hay fatiga severa o lesión — nunca por precaución genérica.
 6. Escribir el plan con update_weekly_plan en formato markdown completo.
-7. Crear en Garmin Connect UN workout por cada sesión de running de la semana siguiente, incluyendo los rodajes fáciles y suaves. Todos los días de entrenamiento deben aparecer en el calendario de Garmin. Usar target heart_rate para los rodajes fáciles/Z2, y target pace para calidad y tirada.
+7. SOLO SI el plan global del contexto indica "workouts_created: false" para la semana siguiente: crear en Garmin UN workout por cada sesión de running (easy runs, Z2, calidad y tirada larga). Si ya indica "workouts_created: true", NO crear workouts (ya existen).
 
 Reglas duras:
-- La tirada larga es innegociable. Si hay que ajustar algo, se ajusta lo demás, no la tirada.
-- Rodajes fáciles: FC ≤ 154 bpm (Z2 Karvonen). No añadir ritmo objetivo en el plan, solo FC.
-- Calidad siempre de mañana (mientras haga calor, hasta mediados de septiembre).
+- SIEMPRE incluir la sesión de calidad que marque el plan global (series o umbral). No rebajarla a progresivo salvo fatiga explícita en los datos de Garmin.
+- La tirada larga es innegociable.
+- Rodajes fáciles: FC ≤ 154 bpm. Calidad: usar target pace según plan global.
+- Calidad siempre de mañana (hasta mediados de septiembre).
 - Responde siempre en español.`;
 
 const WEEKLY_REVIEW_PROMPT = `Es lunes. Ejecuta la revisión semanal completa:
 
-1. Llama a get_training_context para ver zonas, objetivos, plan global y plan de la semana que acaba de terminar.
-2. Llama a get_garmin_recent_activities con limit=14 para ver las últimas 2 semanas de actividades.
-3. Para cada sesión de running de la semana pasada (lunes a domingo), añade una entrada al log con append_training_log.
-4. Analiza internamente: ¿se completó la tirada larga? ¿qué sesiones de calidad se hicieron? ¿cómo fue la FC en los rodajes fáciles?
-5. Determina qué semana del plan global corresponde a la próxima semana y genera el plan completo.
-6. Escribe el plan con update_weekly_plan.
-7. Crea en Garmin un workout por CADA sesión de running de la semana siguiente, sin excepción: easy runs, rodajes suaves, sesión de calidad y tirada larga. Todos deben aparecer en el calendario de Garmin. Easy runs y Z2: target heart_rate. Calidad y tirada: target pace con warmup/cooldown.
+1. Llama a get_training_context. Fíjate en el campo "workouts_created" del plan de la semana siguiente para saber si ya tienes que crear workouts en Garmin o no.
+2. Llama a get_garmin_recent_activities con limit=14.
+3. Para cada sesión de running de la semana pasada (lunes a domingo anterior), añade UNA entrada al log con append_training_log. No repitas sesiones.
+4. Determina qué semana del plan global corresponde a la próxima semana. Sigue el plan global AL PIE DE LA LETRA para la sesión de calidad (series o umbral) y la tirada larga. Solo ajusta el volumen de los easy runs.
+5. Escribe el plan completo con update_weekly_plan. Incluye al final del plan: "workouts_created: false".
+6. Si workouts_created era false (o no existía): crea en Garmin un workout por CADA sesión de running de la semana, sin excepción. Tras crearlos todos, actualiza el plan con update_weekly_plan cambiando "workouts_created: false" por "workouts_created: true".
 
-Cuando termines, responde con un resumen de lo que has hecho: sesiones registradas, plan escrito y workouts creados.`;
+Cuando termines, responde con un resumen: sesiones registradas, plan escrito, workouts creados (o saltados por ya existir).`;
 
 const TOOLS: Anthropic.Tool[] = [
   {
