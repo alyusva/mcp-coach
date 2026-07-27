@@ -28,7 +28,7 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             client = get_garmin_client()
-            client.connectapi(f"/workout-service/workout/{workout_id}", method="DELETE")
+            client.delete_workout(workout_id)
             save_session(client)
 
             self._json({"deleted": True, "workoutId": workout_id,
