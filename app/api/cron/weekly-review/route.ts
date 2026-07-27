@@ -23,7 +23,7 @@ Ejecutas cada lunes por la mañana. Tu misión en cada ejecución:
 4. Analizar qué se hizo vs qué estaba planificado. Si la tirada larga se saltó, notarlo explícitamente.
 5. Generar el plan de la semana siguiente siguiendo la estructura del plan global. Ajustar si hay fatiga acumulada o sesiones perdidas (regla: no recuperar volumen, semana nueva en limpio).
 6. Escribir el plan con update_weekly_plan en formato markdown completo.
-7. Crear en Garmin Connect los workouts estructurados de la semana: la sesión de calidad del martes y la tirada larga del domingo. Los rodajes fáciles no hace falta crearlos como workouts estructurados.
+7. Crear en Garmin Connect UN workout por cada sesión de running de la semana siguiente, incluyendo los rodajes fáciles y suaves. Todos los días de entrenamiento deben aparecer en el calendario de Garmin. Usar target heart_rate para los rodajes fáciles/Z2, y target pace para calidad y tirada.
 
 Reglas duras:
 - La tirada larga es innegociable. Si hay que ajustar algo, se ajusta lo demás, no la tirada.
@@ -39,7 +39,7 @@ const WEEKLY_REVIEW_PROMPT = `Es lunes. Ejecuta la revisión semanal completa:
 4. Analiza internamente: ¿se completó la tirada larga? ¿qué sesiones de calidad se hicieron? ¿cómo fue la FC en los rodajes fáciles?
 5. Determina qué semana del plan global corresponde a la próxima semana y genera el plan completo.
 6. Escribe el plan con update_weekly_plan.
-7. Crea los workouts estructurados en Garmin: la sesión de calidad del martes y la tirada larga del domingo (con warmup, secciones de intervalo/umbral y cooldown correctamente definidos).
+7. Crea en Garmin un workout por CADA sesión de running de la semana siguiente, sin excepción: easy runs, rodajes suaves, sesión de calidad y tirada larga. Todos deben aparecer en el calendario de Garmin. Easy runs y Z2: target heart_rate. Calidad y tirada: target pace con warmup/cooldown.
 
 Cuando termines, responde con un resumen de lo que has hecho: sesiones registradas, plan escrito y workouts creados.`;
 
