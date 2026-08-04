@@ -11,6 +11,7 @@ import {
   getGarminRecentActivities,
   getGarminScheduledWorkouts,
   deleteGarminWorkout,
+  getGarminActivitySplits,
 } from "@/lib/garmin-client";
 
 const GarminStepSchema: z.ZodType<object> = z.lazy(() =>
@@ -118,6 +119,20 @@ const mcpHandler = createMcpHandler(
         const result = await deleteGarminWorkout(workoutId);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        };
+      },
+    );
+
+    server.tool(
+      "get_garmin_activity_splits",
+      "Obtiene el detalle por vuelta/serie de una actividad de Garmin Connect: tipo (calentamiento/activo/recuperación/enfriamiento), distancia, duración, ritmo, FC, potencia y cadencia de cada lap. Usar el activityId devuelto por get_garmin_recent_activities.",
+      {
+        activityId: z.number().int().describe("ID numérico de la actividad en Garmin Connect"),
+      },
+      async ({ activityId }) => {
+        const splits = await getGarminActivitySplits(activityId);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(splits, null, 2) }],
         };
       },
     );

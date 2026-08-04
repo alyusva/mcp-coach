@@ -84,6 +84,24 @@ export interface DeleteWorkoutResult {
   message: string;
 }
 
+export interface ActivityLap {
+  lapIndex: number;
+  type: "warmup" | "active" | "recovery" | "rest" | "cooldown" | "other";
+  distanceMeters: number | null;
+  durationSecs: number | null;
+  avgPaceMinPerKm: number | null;
+  avgHeartRate: number | null;
+  maxHeartRate: number | null;
+  avgPowerW: number | null;
+  avgCadence: number | null;
+}
+
+export interface ActivitySplits {
+  activityId: number;
+  laps: ActivityLap[];
+  count: number;
+}
+
 export async function createGarminWorkout(params: CreateWorkoutParams): Promise<CreateWorkoutResult> {
   return callGarminBackend<CreateWorkoutResult>("create_workout", params);
 }
@@ -102,4 +120,8 @@ export async function getGarminScheduledWorkouts(startDate: string, endDate: str
 
 export async function deleteGarminWorkout(workoutId: number): Promise<DeleteWorkoutResult> {
   return callGarminBackend<DeleteWorkoutResult>("delete_workout", { workoutId });
+}
+
+export async function getGarminActivitySplits(activityId: number): Promise<ActivitySplits> {
+  return callGarminBackend<ActivitySplits>("activity_splits", { activityId });
 }
