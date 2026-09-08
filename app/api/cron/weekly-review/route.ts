@@ -185,7 +185,7 @@ export async function GET(req: Request) {
 
   for (let turn = 0; turn < 25; turn++) {
     const response = await anthropic.messages.create({
-      model: "claude-opus-4-7",
+      model: "claude-haiku-4-5",
       max_tokens: 8096,
       system: SYSTEM_PROMPT,
       tools: TOOLS,
