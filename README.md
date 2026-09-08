@@ -8,11 +8,16 @@ Servidor MCP personal que actúa como entrenador AI de running. Se conecta a Cla
 Claude (conversación)
     └── Custom MCP connector (URL de producción + Bearer token)
             └── mcp-coach (Next.js en Vercel)
-                    ├── 5 MCP tools (TypeScript, App Router)
+                    ├── 6 MCP tools (TypeScript, App Router)
                     ├── GitHub API → tu-repo-de-memoria (markdown commits)
-                    └── /api/garmin/* (Python serverless)
-                            └── Garmin Connect API
-                                    └── Token de sesión en Upstash Redis
+                    ├── /api/garmin/* (Python serverless)
+                    │       └── Garmin Connect API
+                    │               └── Token de sesión en Upstash Redis
+                    └── Crons (Vercel)
+                            ├── health-sync (domingos, 1h antes de weekly-review)
+                            │       sincroniza sueño/HRV/body battery/estrés/training readiness
+                            └── weekly-review (domingos)
+                                    revisa la semana, escribe el plan siguiente y crea workouts
 ```
 
 ## Tools disponibles
@@ -22,8 +27,11 @@ Claude (conversación)
 | `get_training_context` | Lee zonas, objetivos y plan semanal actual |
 | `update_weekly_plan` | Escribe nuevo plan; archiva el anterior en `log/` |
 | `append_training_log` | Añade entrada al log semanal (no sobrescribe) |
+| `get_health_context` | Lee el histórico de salud (sueño, HRV, body battery, FC reposo, estrés, training readiness) de las últimas N semanas |
 | `create_garmin_workout` | Crea y programa un workout estructurado en Garmin Connect |
 | `get_garmin_recent_activities` | Últimas N actividades de Garmin (distancia, FC, ritmo) |
+
+Los datos de salud no se recogen bajo demanda: los sincroniza automáticamente el cron `health-sync` cada domingo (ver abajo). `get_health_context` solo lee lo que ese cron ya haya escrito en `health/YYYY-Www.md`.
 
 ## Setup
 
@@ -37,7 +45,7 @@ npm install
 
 ### 2. Crea tu propio repo de memoria
 
-`mcp-coach` no trae memoria incluida: necesita un repo de GitHub aparte donde leer y escribir tu histórico de entrenamiento. Crea un repo **nuevo y privado** (p. ej. `tu-usuario/mi-coach-memory`) con esta estructura:
+`mcp-coach` no trae memoria incluida: necesita un repo de GitHub aparte donde leer y escribir tu histórico de entrenamiento y salud. Crea un repo **nuevo y privado** (p. ej. `tu-usuario/mi-coach-memory`) con esta estructura:
 
 ```
 config/
@@ -46,7 +54,9 @@ config/
 plan/
   semana-actual.md  # Plan de la semana en curso (se sobrescribe cada semana)
 log/
-  .gitkeep          # Histórico semanal (se genera solo, YYYY-Www.md)
+  .gitkeep          # Histórico semanal de entrenos (se genera solo, YYYY-Www.md)
+health/
+  .gitkeep          # Histórico semanal de salud (se genera solo, YYYY-Www.md)
 ```
 
 Puedes copiar el `README.md` de [mcp-coach-memory](https://github.com/alyusva/mcp-coach-memory) para ver el formato exacto de cada archivo, pero **no forkees ni copies su contenido** — son datos personales de otra persona. Rellena `zonas.md` y `objetivos.md` con tus propios datos.
@@ -89,6 +99,8 @@ Importa el repo desde el dashboard de Vercel (Import Project → selecciona `mcp
 | `MEMORY_REPO` | `tu-usuario/mi-coach-memory` — **el repo que creaste en el paso 2**, no `alyusva/mcp-coach-memory` |
 | `REDIS_URL` | URL de Upstash Redis |
 
+Los crons (`health-sync` y `weekly-review`) usan las mismas variables — no hay configuración adicional.
+
 ### 6. GitHub Token (Fine-grained PAT)
 
 1. GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
@@ -112,10 +124,14 @@ Una vez desplegado en Vercel:
    (o la URL de producción de tu proyecto)
 4. **Headers**: `Authorization: Bearer <tu-MCP_AUTH_TOKEN>`
 
-Con esto, Claude tendrá acceso a las 5 tools en cualquier conversación donde estén habilitadas.
+Con esto, Claude tendrá acceso a las tools en cualquier conversación donde estén habilitadas.
 
 ## Notas sobre el paquete MCP
 
 Se usa `@vercel/mcp-adapter` (el adaptador oficial de Vercel para MCP).
 El transport es Streamable HTTP. La ruta dinámica `app/[transport]/route.ts`
 maneja tanto `/mcp` como `/sse` automáticamente.
+
+## Notas sobre `health_data.py`
+
+Los nombres de campo de la API no oficial de Garmin (`sleepScores`, `hrvSummary`, `WELLNESS_RESTING_HEART_RATE`, etc.) pueden variar entre versiones de `garminconnect` o entre modelos de reloj. Antes de confiar en el cron `health-sync` en producción, ejecútalo una vez manualmente (`curl` al endpoint con el `CRON_SECRET`) y revisa que `health/YYYY-Www.md` se rellena con datos reales, no solo con `—`.
