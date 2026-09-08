@@ -102,6 +102,46 @@ export interface ActivitySplits {
   count: number;
 }
 
+export interface DailySleep {
+  scoreValue: number | null;
+  scoreQualifier: string | null;
+  totalSleepSeconds: number | null;
+  deepSeconds: number | null;
+  lightSeconds: number | null;
+  remSeconds: number | null;
+  awakeSeconds: number | null;
+}
+
+export interface DailyHrv {
+  lastNightAvg: number | null;
+  status: string | null;
+}
+
+export interface DailyBodyBattery {
+  charged: number | null;
+  drained: number | null;
+}
+
+export interface DailyStress {
+  avgLevel: number | null;
+  maxLevel: number | null;
+}
+
+export interface DailyTrainingReadiness {
+  score: number | null;
+  level: string | null;
+}
+
+export interface DailyHealth {
+  date: string;
+  sleep: DailySleep | null;
+  hrv: DailyHrv | null;
+  bodyBattery: DailyBodyBattery | null;
+  restingHeartRate: number | null;
+  stress: DailyStress | null;
+  trainingReadiness: DailyTrainingReadiness | null;
+}
+
 export async function createGarminWorkout(params: CreateWorkoutParams): Promise<CreateWorkoutResult> {
   return callGarminBackend<CreateWorkoutResult>("create_workout", params);
 }
@@ -124,4 +164,8 @@ export async function deleteGarminWorkout(workoutId: number): Promise<DeleteWork
 
 export async function getGarminActivitySplits(activityId: number): Promise<ActivitySplits> {
   return callGarminBackend<ActivitySplits>("activity_splits", { activityId });
+}
+
+export async function getGarminHealthData(startDate: string, endDate: string): Promise<DailyHealth[]> {
+  return callGarminBackend<DailyHealth[]>("health_data", { startDate, endDate });
 }
