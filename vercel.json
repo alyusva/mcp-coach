@@ -6,6 +6,10 @@
   },
   "crons": [
     {
+      "path": "/api/cron/health-sync",
+      "schedule": "0 14 * * 0"
+    },
+    {
       "path": "/api/cron/weekly-review",
       "schedule": "0 15 * * 0"
     }
