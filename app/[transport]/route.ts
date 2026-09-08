@@ -5,6 +5,7 @@ import {
   getTrainingContext,
   updateWeeklyPlan,
   appendTrainingLog,
+  getHealthContext,
 } from "@/lib/github-memory";
 import {
   createGarminWorkout,
@@ -59,6 +60,16 @@ const mcpHandler = createMcpHandler(
       async ({ entry }) => {
         const result = await appendTrainingLog(entry);
         return { content: [{ type: "text" as const, text: result }] };
+      },
+    );
+
+    server.tool(
+      "get_health_context",
+      "Lee el histórico de salud (sueño, HRV nocturno, body battery, FC en reposo, estrés y training readiness) de las últimas N semanas, generado por el cron semanal de sincronización con Garmin Connect.",
+      { weeks: z.number().int().min(1).max(8).default(2) },
+      async ({ weeks }) => {
+        const context = await getHealthContext(weeks);
+        return { content: [{ type: "text" as const, text: context }] };
       },
     );
 
