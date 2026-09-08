@@ -1,6 +1,6 @@
 # mcp-coach
 
-Servidor MCP personal que actúa como entrenador AI de running. Se conecta a Claude vía un conector MCP personalizado y persiste la memoria en [mcp-coach-memory](https://github.com/alyusva/mcp-coach-memory).
+Servidor MCP personal que actúa como entrenador AI de running. Se conecta a Claude vía un conector MCP personalizado y persiste la memoria en un repo de memoria propio (ver más abajo). El autor original usa [mcp-coach-memory](https://github.com/alyusva/mcp-coach-memory) como ejemplo — ese repo es privado y contiene datos personales, pero puedes usarlo como **plantilla** para crear el tuyo.
 
 ## Arquitectura
 
@@ -9,7 +9,7 @@ Claude (conversación)
     └── Custom MCP connector (URL de producción + Bearer token)
             └── mcp-coach (Next.js en Vercel)
                     ├── 5 MCP tools (TypeScript, App Router)
-                    ├── GitHub API → mcp-coach-memory (markdown commits)
+                    ├── GitHub API → tu-repo-de-memoria (markdown commits)
                     └── /api/garmin/* (Python serverless)
                             └── Garmin Connect API
                                     └── Token de sesión en Upstash Redis
@@ -35,14 +35,30 @@ cd mcp-coach
 npm install
 ```
 
-### 2. Variables de entorno locales
+### 2. Crea tu propio repo de memoria
+
+`mcp-coach` no trae memoria incluida: necesita un repo de GitHub aparte donde leer y escribir tu histórico de entrenamiento. Crea un repo **nuevo y privado** (p. ej. `tu-usuario/mi-coach-memory`) con esta estructura:
+
+```
+config/
+  zonas.md          # Zonas de FC, ritmo y potencia
+  objetivos.md      # Carrera objetivo, fase de periodización, notas de lesiones
+plan/
+  semana-actual.md  # Plan de la semana en curso (se sobrescribe cada semana)
+log/
+  .gitkeep          # Histórico semanal (se genera solo, YYYY-Www.md)
+```
+
+Puedes copiar el `README.md` de [mcp-coach-memory](https://github.com/alyusva/mcp-coach-memory) para ver el formato exacto de cada archivo, pero **no forkees ni copies su contenido** — son datos personales de otra persona. Rellena `zonas.md` y `objetivos.md` con tus propios datos.
+
+### 3. Variables de entorno locales
 
 ```bash
 cp .env.example .env.local
 # edita .env.local con tus valores reales
 ```
 
-### 3. Desarrollo local
+### 4. Desarrollo local
 
 ```bash
 npm run dev
@@ -57,7 +73,7 @@ curl -X POST http://localhost:3000/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-### 4. Deploy en Vercel
+### 5. Deploy en Vercel
 
 Importa el repo desde el dashboard de Vercel (Import Project → selecciona `mcp-coach`).
 
@@ -70,23 +86,23 @@ Importa el repo desde el dashboard de Vercel (Import Project → selecciona `mcp
 | `GARMIN_EMAIL` | Email de Garmin Connect |
 | `GARMIN_PASSWORD` | Contraseña de Garmin Connect |
 | `GITHUB_TOKEN` | Fine-grained PAT de GitHub (ver abajo) |
-| `MEMORY_REPO` | `alyusva/mcp-coach-memory` |
+| `MEMORY_REPO` | `tu-usuario/mi-coach-memory` — **el repo que creaste en el paso 2**, no `alyusva/mcp-coach-memory` |
 | `REDIS_URL` | URL de Upstash Redis |
 
-### 5. GitHub Token (Fine-grained PAT)
+### 6. GitHub Token (Fine-grained PAT)
 
 1. GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
-2. **Repository access**: solo `alyusva/mcp-coach-memory`
+2. **Repository access**: solo tu repo de memoria (el del paso 2)
 3. **Permissions → Contents**: Read and write
 4. Copia el token y ponlo en `GITHUB_TOKEN`
 
-### 6. Upstash Redis
+### 7. Upstash Redis
 
 1. Crea una base de datos gratuita en [upstash.com](https://upstash.com)
 2. Copia la **REST URL** o la **Redis URL** (`rediss://default:...`)
 3. Ponla en `REDIS_URL`
 
-### 7. Conector MCP en Claude
+### 8. Conector MCP en Claude
 
 Una vez desplegado en Vercel:
 
