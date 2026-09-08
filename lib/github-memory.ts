@@ -145,3 +145,51 @@ export async function appendTrainingLog(entry: string): Promise<string> {
 
   return `✓ Entrada añadida al log ${logPath}.`;
 }
+
+/**
+ * Sobrescribe por completo health/YYYY-Www.md de la semana en curso.
+ * A diferencia del log de entrenos (que hace append), aquí el cron semanal
+ * regenera la tabla entera de la semana en cada ejecución — es idempotente
+ * y evita ir acumulando filas duplicadas si el cron se reintenta.
+ */
+export async function writeHealthLog(content: string): Promise<string> {
+  const { year, week } = isoWeek(new Date());
+  const label = weekLabel(year, week);
+  const healthPath = `health/${label}.md`;
+
+  let sha: string | null = null;
+  try {
+    const existing = await readFile(healthPath);
+    sha = existing.sha;
+  } catch (e) {
+    if (!(e instanceof Error && e.message.startsWith("FILE_NOT_FOUND"))) throw e;
+  }
+
+  await writeFile(healthPath, content, sha, `health: semana ${label}`);
+
+  return `✓ Datos de salud escritos en ${healthPath}.`;
+}
+
+export async function getHealthContext(weeks = 2): Promise<string> {
+  const now = new Date();
+  const labels: string[] = [];
+  for (let i = 0; i < weeks; i++) {
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() - i * 7);
+    const { year, week } = isoWeek(d);
+    labels.push(weekLabel(year, week));
+  }
+
+  const files = await Promise.all(
+    [...new Set(labels)].map((label) =>
+      readFile(`health/${label}.md`)
+        .then((f) => f.content)
+        .catch(() => null),
+    ),
+  );
+
+  const found = files.filter((c): c is string => c !== null);
+  if (found.length === 0) return "_Sin datos de salud registrados aún._";
+
+  return found.reverse().join("\n\n---\n\n");
+}
