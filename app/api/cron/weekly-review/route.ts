@@ -2,8 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   getTrainingContext,
   updateWeeklyPlan,
-  appendTrainingLog,
   getHealthContext,
+  recordGarminActivity,
+  setWeeklyWorkoutsCreated,
 } from "@/lib/github-memory";
 import {
   createGarminWorkout,
@@ -20,28 +21,29 @@ const SYSTEM_PROMPT = `Eres el entrenador AI automatizado de Álvaro para su pre
 Ejecutas cada lunes por la mañana, justo después de que un cron independiente (health-sync) haya sincronizado los datos de salud de la semana que acaba de terminar (sueño, HRV, body battery, FC en reposo, estrés, training readiness) en el repo de memoria. Tu misión en cada ejecución:
 1. Leer el contexto completo: zonas, objetivos, plan global y plan de la semana que acaba de terminar (get_training_context), y el contexto de salud de las últimas 2 semanas (get_health_context).
 2. Leer las actividades de Garmin de los últimos 14 días.
-3. Registrar en el log cada sesión de running de la semana pasada — UNA entrada por sesión, sin repetir sesiones ya registradas.
-4. Analizar qué se hizo vs qué estaba planificado. Si la tirada larga se saltó, notarlo explícitamente. Cruza esto con el contexto de salud: una sesión floja con HRV bajo o sueño pobre esa noche es fatiga real, no falta de ejecución.
-5. Generar el plan de la semana siguiente siguiendo ESTRICTAMENTE la estructura del plan global. Solo puedes desviar la sesión de calidad si hay fatiga severa o lesión — nunca por precaución genérica. El contexto de salud (HRV significativamente por debajo de lo habitual, sueño pobre varios días seguidos, o Training Readiness bajo de forma sostenida) cuenta como evidencia válida de fatiga severa, igual que las notas de sensaciones del log.
+3. Registrar exclusivamente los datos observados de cada sesión de running de la semana pasada. No inventes, infieras ni completes métricas ausentes.
+4. Analizar qué se hizo vs qué estaba planificado, separando "hechos observados" de "interpretación". Si la tirada larga no aparece en Garmin, di "no observada"; nunca "no realizada". Cruza la evidencia con salud: HRV bajo, sueño pobre repetido o Training Readiness bajo sostenido cuentan como fatiga severa.
+5. Generar el plan de la semana siguiente siguiendo ESTRICTAMENTE la estructura del plan global. Solo puedes desviar la sesión de calidad si hay fatiga severa demostrada o lesión.
 6. Escribir el plan con update_weekly_plan en formato markdown completo.
-7. SOLO SI el plan global del contexto indica "workouts_created: false" para la semana siguiente: crear en Garmin UN workout por cada sesión de running (easy runs, Z2, calidad y tirada larga). Si ya indica "workouts_created: true", NO crear workouts (ya existen).
+7. SOLO SI el plan actual indica "workouts_created: false": crear en Garmin UN workout por cada sesión de running (easy runs, Z2, calidad y tirada larga). Si ya indica "workouts_created: true", NO crear workouts (ya existen).
 
 Reglas duras:
 - SIEMPRE incluir la sesión de calidad que marque el plan global (series o umbral). No rebajarla a progresivo salvo fatiga explícita (log de sensaciones o datos de salud).
 - La tirada larga es innegociable.
 - Rodajes fáciles: FC ≤ 154 bpm. Calidad: usar target pace según plan global.
 - Calidad siempre de mañana (hasta mediados de septiembre).
-- Responde siempre en español.`;
+- Responde siempre en español.
+- Una predicción o diagnóstico nunca es un hecho: etiqueta explícitamente su incertidumbre.`;
 
 const WEEKLY_REVIEW_PROMPT = `Es lunes. Ejecuta la revisión semanal completa:
 
 1. Llama a get_training_context. Fíjate en el campo "workouts_created" del plan de la semana siguiente para saber si ya tienes que crear workouts en Garmin o no.
 2. Llama a get_health_context con weeks=2 para ver la tendencia de sueño, HRV, body battery, FC reposo, estrés y training readiness de la semana que acaba de terminar y la anterior.
 3. Llama a get_garmin_recent_activities con limit=14.
-4. Para cada sesión de running de la semana pasada (lunes a domingo anterior), añade UNA entrada al log con append_training_log. No repitas sesiones.
-5. Determina qué semana del plan global corresponde a la próxima semana. Sigue el plan global AL PIE DE LA LETRA para la sesión de calidad (series o umbral) y la tirada larga. Solo ajusta el volumen de los easy runs. Si el contexto de salud muestra señales claras de fatiga acumulada (HRV bajo, sueño pobre repetido, training readiness bajo varios días), refléjalo en el plan y explica por qué en el propio plan.
-6. Escribe el plan completo con update_weekly_plan. Incluye al final del plan: "workouts_created: false".
-7. Si workouts_created era false (o no existía): crea en Garmin un workout por CADA sesión de running de la semana, sin excepción. Tras crearlos todos, actualiza el plan con update_weekly_plan cambiando "workouts_created: false" por "workouts_created: true".
+4. Para cada sesión de running de la semana pasada, llama a record_garmin_activity una vez, copiando exactamente sus campos. No escribas interpretación dentro de ese registro.
+5. Determina qué semana del plan global corresponde a la próxima semana. Sigue su sesión de calidad y tirada larga. Si el contexto de salud muestra fatiga acumulada, refléjalo y cita la evidencia.
+6. Escribe el plan completo con update_weekly_plan. Incluye al final: "workouts_created: false".
+7. Si workouts_created era false (o no existía), crea los workouts y llama a set_weekly_workouts_created con created: true. No llames de nuevo a update_weekly_plan.
 
 Cuando termines, responde con un resumen: sesiones registradas, tendencia de salud observada, plan escrito, workouts creados (o saltados por ya existir).`;
 
@@ -75,18 +77,31 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "append_training_log",
+    name: "record_garmin_activity",
     description:
-      "Añade una entrada al log semanal. Llamar una vez por sesión de running registrada.",
+      "Registra una actividad observada de Garmin una sola vez. Copiar métricas sin modificarlas.",
     input_schema: {
       type: "object" as const,
       properties: {
-        entry: {
-          type: "string",
-          description: "Texto markdown: fecha, tipo de sesión, distancia, FC media, ritmo, valoración breve.",
-        },
+        activityId: { type: "integer" },
+        name: { type: "string" },
+        type: { type: "string" },
+        date: { type: "string" },
+        durationSecs: { type: "number" },
+        distanceMeters: { type: "number" },
+        avgHeartRate: { type: ["number", "null"] },
+        avgPaceMinPerKm: { type: ["number", "null"] },
       },
-      required: ["entry"],
+      required: ["activityId", "name", "type", "date", "durationSecs", "distanceMeters", "avgHeartRate", "avgPaceMinPerKm"],
+    },
+  },
+  {
+    name: "set_weekly_workouts_created",
+    description: "Actualiza únicamente el estado de creación de workouts sin archivar el plan.",
+    input_schema: {
+      type: "object" as const,
+      properties: { created: { type: "boolean" } },
+      required: ["created"],
     },
   },
   {
@@ -156,8 +171,19 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<st
         null,
         2,
       );
-    case "append_training_log":
-      return await appendTrainingLog(input.entry as string);
+    case "record_garmin_activity":
+      return await recordGarminActivity({
+        id: input.activityId as number,
+        name: input.name as string,
+        type: input.type as string,
+        date: input.date as string,
+        durationSecs: input.durationSecs as number,
+        distanceMeters: input.distanceMeters as number,
+        avgHeartRate: input.avgHeartRate as number | null,
+        avgPaceMinPerKm: input.avgPaceMinPerKm as number | null,
+      });
+    case "set_weekly_workouts_created":
+      return await setWeeklyWorkoutsCreated(input.created as boolean);
     case "update_weekly_plan":
       return await updateWeeklyPlan(input.content as string);
     case "create_garmin_workout":

@@ -61,10 +61,37 @@ function weekLabel(year: number, week: number) {
   return `${year}-W${String(week).padStart(2, "0")}`;
 }
 
+function formatPace(seconds: number | null): string {
+  if (seconds === null) return "—";
+  const mins = Math.floor(seconds / 60);
+  return `${mins}:${String(Math.round(seconds % 60)).padStart(2, "0")}/km`;
+}
+
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.round(seconds % 60);
+  return hours > 0
+    ? `${hours}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+    : `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+export interface GarminActivityRecord {
+  id: number;
+  name: string;
+  type: string;
+  date: string;
+  durationSecs: number;
+  distanceMeters: number;
+  avgHeartRate: number | null;
+  avgPaceMinPerKm: number | null;
+}
+
 export async function getTrainingContext(): Promise<string> {
-  const [zonas, objetivos, planGlobal, planActual] = await Promise.all([
+  const [zonas, objetivos, metodologia, planGlobal, planActual] = await Promise.all([
     readFile("config/zonas.md"),
     readFile("config/objetivos.md"),
+    readFile("config/metodologia.md").catch(() => ({ content: "_Sin contrato de datos_" })),
     readFile("plan/plan-global.md").catch(() => ({ content: "_Sin plan global_" })),
     readFile("plan/semana-actual.md"),
   ]);
@@ -72,6 +99,7 @@ export async function getTrainingContext(): Promise<string> {
   return [
     `# ZONAS DE ENTRENAMIENTO\n\n${zonas.content}`,
     `# OBJETIVOS\n\n${objetivos.content}`,
+    `# METODOLOGÍA Y CONTRATO DE DATOS\n\n${metodologia.content}`,
     `# PLAN GLOBAL (9 semanas)\n\n${planGlobal.content}`,
     `# PLAN SEMANA ACTUAL\n\n${planActual.content}`,
   ].join("\n\n---\n\n");
@@ -146,50 +174,93 @@ export async function appendTrainingLog(entry: string): Promise<string> {
   return `✓ Entrada añadida al log ${logPath}.`;
 }
 
-/**
- * Sobrescribe por completo health/YYYY-Www.md de la semana en curso.
- * A diferencia del log de entrenos (que hace append), aquí el cron semanal
- * regenera la tabla entera de la semana en cada ejecución — es idempotente
- * y evita ir acumulando filas duplicadas si el cron se reintenta.
- */
-export async function writeHealthLog(content: string): Promise<string> {
-  const { year, week } = isoWeek(new Date());
+/** Persiste una actividad observada exactamente como la devuelve Garmin. */
+export async function recordGarminActivity(activity: GarminActivityRecord): Promise<string> {
+  const activityDate = new Date(`${activity.date.slice(0, 10)}T12:00:00Z`);
+  if (Number.isNaN(activityDate.getTime())) throw new Error("Fecha de actividad Garmin inválida");
+
+  const { year, week } = isoWeek(activityDate);
   const label = weekLabel(year, week);
-  const healthPath = `health/${label}.md`;
+  const logPath = `log/${label}.md`;
+  const marker = `<!-- garmin-activity:${activity.id} -->`;
 
   let sha: string | null = null;
+  let existing = "";
   try {
-    const existing = await readFile(healthPath);
-    sha = existing.sha;
+    const log = await readFile(logPath);
+    sha = log.sha;
+    existing = log.content;
   } catch (e) {
     if (!(e instanceof Error && e.message.startsWith("FILE_NOT_FOUND"))) throw e;
   }
 
-  await writeFile(healthPath, content, sha, `health: semana ${label}`);
+  if (existing.includes(marker)) {
+    return `✓ Actividad Garmin ${activity.id} ya estaba registrada en ${logPath}.`;
+  }
 
+  const distanceKm = (activity.distanceMeters / 1000).toFixed(2);
+  const content = [
+    marker,
+    `## Actividad ${activity.date.slice(0, 10)} · Garmin ${activity.id}`,
+    "",
+    `- Nombre: ${activity.name}`,
+    `- Tipo: ${activity.type}`,
+    `- Distancia: ${distanceKm} km`,
+    `- Duración: ${formatDuration(activity.durationSecs)}`,
+    `- Ritmo medio: ${formatPace(activity.avgPaceMinPerKm)}`,
+    `- FC media: ${activity.avgHeartRate === null ? "—" : `${activity.avgHeartRate} bpm`}`,
+    "",
+    "> Datos observados importados de Garmin. La interpretación se registra por separado y debe citar esta actividad.",
+  ].join("\n");
+
+  const newContent = existing
+    ? `${existing}\n\n---\n\n${content}`
+    : `# Log semana ${label}\n\n${content}`;
+
+  await writeFile(logPath, newContent, sha, `log: Garmin actividad ${activity.id}`);
+  return `✓ Actividad Garmin ${activity.id} registrada en ${logPath}.`;
+}
+
+/** Cambia el estado de programación sin archivar de nuevo toda la semana. */
+export async function setWeeklyWorkoutsCreated(created: boolean): Promise<string> {
+  const plan = await readFile("plan/semana-actual.md");
+  const marker = `workouts_created: ${created}`;
+  const content = /workouts_created:\s*(true|false)/.test(plan.content)
+    ? plan.content.replace(/workouts_created:\s*(true|false)/, marker)
+    : `${plan.content.trimEnd()}\n\n${marker}\n`;
+
+  await writeFile("plan/semana-actual.md", content, plan.sha, `plan: workouts ${created ? "created" : "pending"}`);
+  return `✓ Estado de workouts actualizado a ${created}.`;
+}
+
+/** Sobrescribe la tabla de salud semanal; el cron puede reintentarse sin duplicarla. */
+export async function writeHealthLog(content: string): Promise<string> {
+  const { year, week } = isoWeek(new Date());
+  const label = weekLabel(year, week);
+  const healthPath = `health/${label}.md`;
+  let sha: string | null = null;
+  try {
+    sha = (await readFile(healthPath)).sha;
+  } catch (e) {
+    if (!(e instanceof Error && e.message.startsWith("FILE_NOT_FOUND"))) throw e;
+  }
+  await writeFile(healthPath, content, sha, `health: semana ${label}`);
   return `✓ Datos de salud escritos en ${healthPath}.`;
 }
 
 export async function getHealthContext(weeks = 2): Promise<string> {
   const now = new Date();
-  const labels: string[] = [];
-  for (let i = 0; i < weeks; i++) {
-    const d = new Date(now);
-    d.setUTCDate(d.getUTCDate() - i * 7);
-    const { year, week } = isoWeek(d);
-    labels.push(weekLabel(year, week));
-  }
-
+  const labels = Array.from({ length: weeks }, (_, index) => {
+    const date = new Date(now);
+    date.setUTCDate(date.getUTCDate() - index * 7);
+    const { year, week } = isoWeek(date);
+    return weekLabel(year, week);
+  });
   const files = await Promise.all(
     [...new Set(labels)].map((label) =>
-      readFile(`health/${label}.md`)
-        .then((f) => f.content)
-        .catch(() => null),
+      readFile(`health/${label}.md`).then((file) => file.content).catch(() => null),
     ),
   );
-
-  const found = files.filter((c): c is string => c !== null);
-  if (found.length === 0) return "_Sin datos de salud registrados aún._";
-
-  return found.reverse().join("\n\n---\n\n");
+  const found = files.filter((content): content is string => content !== null);
+  return found.length > 0 ? found.reverse().join("\n\n---\n\n") : "_Sin datos de salud registrados aún._";
 }

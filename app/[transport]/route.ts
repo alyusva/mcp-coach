@@ -6,6 +6,8 @@ import {
   updateWeeklyPlan,
   appendTrainingLog,
   getHealthContext,
+  recordGarminActivity,
+  setWeeklyWorkoutsCreated,
 } from "@/lib/github-memory";
 import {
   createGarminWorkout,
@@ -55,7 +57,7 @@ const mcpHandler = createMcpHandler(
 
     server.tool(
       "append_training_log",
-      "Añade una entrada (con fecha automática) al log semanal actual. No sobrescribe — solo append.",
+      "Añade una nota interpretativa al log semanal actual. No usar para copiar métricas Garmin: usar record_garmin_activity.",
       { entry: z.string().describe("Texto markdown: sesión completada, RPE, notas") },
       async ({ entry }) => {
         const result = await appendTrainingLog(entry);
@@ -70,6 +72,35 @@ const mcpHandler = createMcpHandler(
       async ({ weeks }) => {
         const context = await getHealthContext(weeks);
         return { content: [{ type: "text" as const, text: context }] };
+      },
+    );
+
+    server.tool(
+      "record_garmin_activity",
+      "Registra una actividad observada de Garmin de forma idempotente. Usa los campos exactamente como los devolvió get_garmin_recent_activities; impide duplicados mediante activityId.",
+      {
+        activityId: z.number().int(),
+        name: z.string(),
+        type: z.string(),
+        date: z.string(),
+        durationSecs: z.number().nonnegative(),
+        distanceMeters: z.number().nonnegative(),
+        avgHeartRate: z.number().nullable(),
+        avgPaceMinPerKm: z.number().nullable(),
+      },
+      async ({ activityId, ...activity }) => {
+        const result = await recordGarminActivity({ id: activityId, ...activity });
+        return { content: [{ type: "text" as const, text: result }] };
+      },
+    );
+
+    server.tool(
+      "set_weekly_workouts_created",
+      "Actualiza solo el estado de programación Garmin del plan actual, sin archivarlo de nuevo.",
+      { created: z.boolean() },
+      async ({ created }) => {
+        const result = await setWeeklyWorkoutsCreated(created);
+        return { content: [{ type: "text" as const, text: result }] };
       },
     );
 
