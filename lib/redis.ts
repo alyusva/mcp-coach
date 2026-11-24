@@ -16,30 +16,34 @@ export async function redis(command: (string | number)[]): Promise<unknown> {
 }
 
 /**
- * Limita intentos fallidos de PIN por IP. Devuelve true si aún se permite.
+ * Limita intentos de PIN por IP: 5 cada 15 minutos.
+ *
+ * El intento se reserva con INCR (atómico) ANTES de comprobar el PIN, así que
+ * peticiones simultáneas no pueden leer todas un contador bajo y colarse.
+ * Si el PIN es correcto se devuelve el intento con releasePinAttempt.
  * Si Redis falla, se deniega (falla cerrado).
  */
-const MAX_FAILURES = 5;
+const MAX_ATTEMPTS = 5;
 const WINDOW_SECS = 15 * 60;
 
-function failureKey(ip: string) {
-  return `oauth:pin-fail:${ip}`;
+function attemptsKey(ip: string) {
+  return `oauth:pin-attempts:${ip}`;
 }
 
-export async function pinAttemptsAllowed(ip: string): Promise<boolean> {
+export async function reservePinAttempt(ip: string): Promise<boolean> {
   try {
-    const count = Number((await redis(["GET", failureKey(ip)])) ?? 0);
-    return count < MAX_FAILURES;
+    const count = Number(await redis(["INCR", attemptsKey(ip)]));
+    if (count === 1) await redis(["EXPIRE", attemptsKey(ip), WINDOW_SECS]);
+    return count <= MAX_ATTEMPTS;
   } catch {
     return false;
   }
 }
 
-export async function recordPinFailure(ip: string): Promise<void> {
+export async function releasePinAttempt(ip: string): Promise<void> {
   try {
-    const count = await redis(["INCR", failureKey(ip)]);
-    if (Number(count) === 1) await redis(["EXPIRE", failureKey(ip), WINDOW_SECS]);
+    await redis(["DECR", attemptsKey(ip)]);
   } catch {
-    // Si Redis no responde, pinAttemptsAllowed ya deniega.
+    // Como mucho cuenta un intento de más hasta que caduque la ventana.
   }
 }

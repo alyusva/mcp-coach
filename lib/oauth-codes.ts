@@ -13,8 +13,8 @@ interface CodePayload {
   uri: string;
   state: string | null;
   athleteId: string;
-  /** PKCE (S256). Null si el cliente no lo envió. */
-  challenge: string | null;
+  /** PKCE (S256), obligatorio. */
+  challenge: string;
   ts: number;
 }
 
@@ -26,7 +26,7 @@ export function generateCode(params: {
   redirectUri: string;
   state: string | null;
   athleteId: string;
-  codeChallenge: string | null;
+  codeChallenge: string;
 }): string {
   const body: CodePayload = {
     uri: params.redirectUri,
@@ -56,11 +56,9 @@ export function validateCode(
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString()) as CodePayload;
     if (parsed.uri !== redirectUri) return null;
     if (Date.now() - parsed.ts > CODE_TTL_MS) return null;
-    if (parsed.challenge) {
-      if (!codeVerifier) return null;
-      const computed = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
-      if (computed !== parsed.challenge) return null;
-    }
+    if (!parsed.challenge || !codeVerifier) return null;
+    const computed = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+    if (computed !== parsed.challenge) return null;
     return typeof parsed.athleteId === "string" ? parsed.athleteId : null;
   } catch {
     return null;

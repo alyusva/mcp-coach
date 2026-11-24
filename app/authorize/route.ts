@@ -1,12 +1,12 @@
 import { type NextRequest } from "next/server";
 import { athleteByPin } from "@/lib/athletes";
 import { generateCode, isAllowedRedirect } from "@/lib/oauth-codes";
-import { pinAttemptsAllowed, recordPinFailure } from "@/lib/redis";
+import { releasePinAttempt, reservePinAttempt } from "@/lib/redis";
 
 interface AuthParams {
   redirectUri: string;
   state: string | null;
-  codeChallenge: string | null;
+  codeChallenge: string;
 }
 
 function escapeHtml(value: string): string {
@@ -23,9 +23,11 @@ function readParams(get: (name: string) => string | null): AuthParams | string {
   const redirectUri = get("redirect_uri");
   if (!redirectUri || get("response_type") !== "code") return "Petición de autorización incompleta.";
   if (!isAllowedRedirect(redirectUri)) return "Este cliente no está autorizado a conectarse.";
-  const codeChallenge = get("code_challenge") || null;
-  const method = get("code_challenge_method");
-  if (codeChallenge && method && method !== "S256") return "Método PKCE no soportado.";
+  // PKCE obligatorio: sin él, quien intercepte el código podría canjearlo.
+  const codeChallenge = get("code_challenge");
+  if (!codeChallenge || get("code_challenge_method") !== "S256") {
+    return "Falta PKCE (code_challenge con S256).";
+  }
   return { redirectUri, state: get("state") || null, codeChallenge };
 }
 
@@ -35,8 +37,8 @@ function page(params: AuthParams | null, message: string | null, status = 200): 
         ["response_type", "code"],
         ["redirect_uri", params.redirectUri],
         ["state", params.state ?? ""],
-        ["code_challenge", params.codeChallenge ?? ""],
-        ["code_challenge_method", params.codeChallenge ? "S256" : ""],
+        ["code_challenge", params.codeChallenge],
+        ["code_challenge_method", "S256"],
       ]
         .map(([n, v]) => `<input type="hidden" name="${n}" value="${escapeHtml(v)}">`)
         .join("")
@@ -115,15 +117,13 @@ export async function POST(req: NextRequest) {
   if (typeof params === "string") return page(null, params, 400);
 
   const ip = clientIp(req);
-  if (!(await pinAttemptsAllowed(ip))) {
+  if (!(await reservePinAttempt(ip))) {
     return page(params, "Demasiados intentos. Espera 15 minutos y vuelve a probar.", 429);
   }
 
   const athlete = athleteByPin(get("pin") ?? "");
-  if (!athlete) {
-    await recordPinFailure(ip);
-    return page(params, "PIN incorrecto.", 401);
-  }
+  if (!athlete) return page(params, "PIN incorrecto.", 401);
+  await releasePinAttempt(ip);
 
   const code = generateCode({
     redirectUri: params.redirectUri,
