@@ -121,7 +121,7 @@ class handler(BaseHTTPRequestHandler):
             start_date = date.fromisoformat(body.get("startDate", str(date.today())))
             end_date = date.fromisoformat(body.get("endDate", str(date.today() + timedelta(days=7))))
 
-            client = get_garmin_client()
+            client = get_garmin_client(body)
             workouts = get_calendar_workouts(client, start_date, end_date)
             save_session(client)
 

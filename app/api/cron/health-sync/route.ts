@@ -1,7 +1,9 @@
 import { getGarminHealthData, type DailyHealth } from "@/lib/garmin-client";
 import { writeHealthLog } from "@/lib/github-memory";
+import { listAthletes, type Athlete } from "@/lib/athletes";
 
-export const maxDuration = 60;
+// Un atleta por vuelta en paralelo: el tiempo total es el del más lento.
+export const maxDuration = 300;
 
 function isoWeekBounds(date: Date): { monday: string; sunday: string; label: string } {
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
@@ -55,15 +57,8 @@ function fmtDay(day: DailyHealth): string {
   return `| ${dow} | ${sleep} | ${fases} | ${hrv} | ${battery} | ${rhr} | ${stress} | ${readiness} |`;
 }
 
-export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { monday, sunday, label } = isoWeekBounds(new Date());
-
-  const days = await getGarminHealthData(monday, sunday);
+async function syncAthlete(athlete: Athlete, monday: string, sunday: string, label: string) {
+  const days = await getGarminHealthData(athlete, monday, sunday);
 
   const content = `# Salud semana ${label}
 
@@ -72,7 +67,32 @@ export async function GET(req: Request) {
 ${days.map(fmtDay).join("\n")}
 `;
 
-  const result = await writeHealthLog(content);
+  const result = await writeHealthLog(athlete, content);
+  return { daysProcessed: days.length, result };
+}
 
-  return Response.json({ success: true, label, daysProcessed: days.length, result });
+/** Sincroniza la salud de todos los atletas, o solo de ?athlete=<id>. */
+export async function GET(req: Request) {
+  const authHeader = req.headers.get("authorization");
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const only = new URL(req.url).searchParams.get("athlete");
+  const athletes = listAthletes().filter((a) => !only || a.id === only);
+  if (athletes.length === 0) return Response.json({ error: "Atleta no encontrado" }, { status: 404 });
+
+  const { monday, sunday, label } = isoWeekBounds(new Date());
+  const settled = await Promise.allSettled(
+    athletes.map((athlete) => syncAthlete(athlete, monday, sunday, label)),
+  );
+  const results = Object.fromEntries(
+    settled.map((r, i) => [
+      athletes[i].id,
+      r.status === "fulfilled" ? { ok: true, ...r.value } : { ok: false, error: String(r.reason) },
+    ]),
+  );
+  const success = settled.every((r) => r.status === "fulfilled");
+
+  return Response.json({ success, label, results }, { status: success ? 200 : 207 });
 }

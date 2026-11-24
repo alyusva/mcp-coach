@@ -1,9 +1,14 @@
 import { createMcpHandler, withMcpAuth } from "@vercel/mcp-adapter";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { z } from "zod";
+import { athleteByToken, getAthlete, type Athlete } from "@/lib/athletes";
 import {
   getTrainingContext,
   updateWeeklyPlan,
+  setGoal,
+  setAvailability,
+  saveGlobalPlan,
+  reviseCurrentWeek,
   appendTrainingLog,
   getHealthContext,
   recordGarminActivity,
@@ -15,6 +20,7 @@ import {
   getGarminScheduledWorkouts,
   deleteGarminWorkout,
   getGarminActivitySplits,
+  rescheduleGarminWorkout,
 } from "@/lib/garmin-client";
 
 const GarminStepSchema: z.ZodType<object> = z.lazy(() =>
@@ -33,15 +39,107 @@ const GarminStepSchema: z.ZodType<object> = z.lazy(() =>
   }),
 );
 
+/**
+ * El atleta de cada llamada sale del token verificado (authInfo), nunca de los
+ * argumentos de la tool: así nadie puede pedir los datos de otra persona.
+ */
+function athleteOf(extra: { authInfo?: AuthInfo }): Athlete {
+  const id = extra.authInfo?.extra?.athleteId;
+  const athlete = typeof id === "string" ? getAthlete(id) : undefined;
+  if (!athlete) throw new Error("Petición sin atleta autenticado");
+  return athlete;
+}
+
+const COACH_INSTRUCTIONS = `Eres el entrenador de running (o caminata) de la persona conectada. Empieza siempre con get_training_context.
+
+Flujo:
+1. Si falta el objetivo o la disponibilidad, pregúntalos antes de planificar: qué quiere conseguir y para cuándo, punto de partida, qué días y a qué hora puede entrenar normalmente, cuánto tiempo y qué día prefiere para la sesión larga. Resume lo entendido, pide confirmación y guárdalo con set_goal y set_availability.
+2. Con objetivo y disponibilidad, propón un plan por bloques hasta el objetivo. Enséñalo, pregunta si encaja y ajusta lo que pida. Guárdalo con save_global_plan solo cuando lo apruebe.
+3. Concreta la semana siguiente con update_weekly_plan, solo en los días disponibles, y crea los workouts en Garmin cuando el atleta lo confirme. El plan semanal lleva una tabla por día (Fecha | Día | Sesión | Garmin) con el workoutId de cada sesión creada.
+4. Si esta semana no puede algún día, pregunta qué días sí puede, propón cómo recolocar las sesiones (sin dos sesiones duras seguidas) y, con su visto bueno, aplícalo con adjust_week, que mueve los workouts en Garmin y actualiza la memoria.
+5. Si cambia algo (otro objetivo, otros días, molestias), ajusta y vuelve a guardar lo que corresponda. Nunca sobrescribas objetivo, disponibilidad o plan sin su visto bueno.
+
+Respeta config/coach.md, que manda sobre estas pautas. Habla claro y en español.`;
+
 const mcpHandler = createMcpHandler(
   (server) => {
     server.tool(
       "get_training_context",
       "Lee las zonas de FC/ritmo/potencia, objetivos de temporada y el plan de la semana actual desde el repo de memoria.",
       {},
-      async () => {
-        const context = await getTrainingContext();
+      async (_args, extra) => {
+        const context = await getTrainingContext(athleteOf(extra));
         return { content: [{ type: "text" as const, text: context }] };
+      },
+    );
+
+    server.tool(
+      "set_goal",
+      "Guarda el objetivo del atleta (config/objetivos.md): qué quiere conseguir, para cuándo y su punto de partida. Sustituye el anterior (que queda archivado). Úsalo solo cuando el atleta haya confirmado el texto.",
+      { content: z.string().describe("Markdown completo de objetivos") },
+      async ({ content }, extra) => {
+        const result = await setGoal(athleteOf(extra), content);
+        return { content: [{ type: "text" as const, text: result }] };
+      },
+    );
+
+    server.tool(
+      "set_availability",
+      "Guarda la disponibilidad habitual del atleta (config/disponibilidad.md): qué días puede entrenar, a qué hora, cuánto tiempo, día preferido para la sesión larga y días que nunca puede. Úsalo solo con la confirmación del atleta.",
+      { content: z.string().describe("Markdown completo de disponibilidad") },
+      async ({ content }, extra) => {
+        const result = await setAvailability(athleteOf(extra), content);
+        return { content: [{ type: "text" as const, text: result }] };
+      },
+    );
+
+    server.tool(
+      "save_global_plan",
+      "Guarda el plan por bloques hasta el objetivo (plan/plan-global.md). Sustituye el anterior (que queda archivado). Enséñaselo antes al atleta y guárdalo solo cuando lo apruebe; vuelve a llamarlo con cada iteración aprobada.",
+      { content: z.string().describe("Markdown completo del plan global") },
+      async ({ content }, extra) => {
+        const result = await saveGlobalPlan(athleteOf(extra), content);
+        return { content: [{ type: "text" as const, text: result }] };
+      },
+    );
+
+    server.tool(
+      "adjust_week",
+      "Ajusta la semana en curso cuando el atleta cambia de días o de sesiones: mueve en Garmin los workouts indicados y guarda el plan semanal corregido (sin archivarlo) con una nota en el log. Primero consulta get_garmin_scheduled_workouts para los workoutId, propón el cambio respetando descansos y disponibilidad, y llámalo cuando el atleta lo confirme. Si algún movimiento en Garmin falla, el plan no se guarda.",
+      {
+        moves: z
+          .array(
+            z.object({
+              workoutId: z.number().int().describe("ID del workout en Garmin"),
+              fromDate: z.string().describe("Fecha actual YYYY-MM-DD"),
+              toDate: z.string().describe("Fecha nueva YYYY-MM-DD"),
+            }),
+          )
+          .max(14)
+          .describe("Movimientos en Garmin; vacío si solo cambia el plan escrito"),
+        updatedPlan: z.string().describe("Markdown completo del plan de la semana ya corregido"),
+        reason: z.string().describe("Qué ha cambiado y por qué, para el log"),
+      },
+      async ({ moves, updatedPlan, reason }, extra) => {
+        const athlete = athleteOf(extra);
+        const done: string[] = [];
+        for (const move of moves) {
+          try {
+            const r = await rescheduleGarminWorkout(athlete, move.workoutId, move.fromDate, move.toDate);
+            done.push(r.message);
+          } catch (e) {
+            const text = [
+              ...done.map((m) => `✓ ${m}`),
+              `✗ Workout ${move.workoutId} (${move.fromDate} → ${move.toDate}): ${e instanceof Error ? e.message : String(e)}`,
+              "El plan escrito NO se ha guardado. Revisa con get_garmin_scheduled_workouts y corrige antes de reintentar.",
+            ].join("\n");
+            return { content: [{ type: "text" as const, text }], isError: true };
+          }
+        }
+        const note = [reason.trim(), ...done.map((m) => `- ${m}`)].join("\n");
+        const saved = await reviseCurrentWeek(athlete, updatedPlan, note);
+        const text = [...done.map((m) => `✓ ${m}`), saved].join("\n");
+        return { content: [{ type: "text" as const, text }] };
       },
     );
 
@@ -49,8 +147,8 @@ const mcpHandler = createMcpHandler(
       "update_weekly_plan",
       "Escribe el plan de entrenamiento semanal. Antes de sobreescribir, archiva el plan actual en el log histórico.",
       { content: z.string().describe("Contenido markdown completo del plan semanal") },
-      async ({ content }) => {
-        const result = await updateWeeklyPlan(content);
+      async ({ content }, extra) => {
+        const result = await updateWeeklyPlan(athleteOf(extra), content);
         return { content: [{ type: "text" as const, text: result }] };
       },
     );
@@ -59,8 +157,8 @@ const mcpHandler = createMcpHandler(
       "append_training_log",
       "Añade una nota interpretativa al log semanal actual. No usar para copiar métricas Garmin: usar record_garmin_activity.",
       { entry: z.string().describe("Texto markdown: sesión completada, RPE, notas") },
-      async ({ entry }) => {
-        const result = await appendTrainingLog(entry);
+      async ({ entry }, extra) => {
+        const result = await appendTrainingLog(athleteOf(extra), entry);
         return { content: [{ type: "text" as const, text: result }] };
       },
     );
@@ -69,8 +167,8 @@ const mcpHandler = createMcpHandler(
       "get_health_context",
       "Lee el histórico de salud (sueño, HRV nocturno, body battery, FC en reposo, estrés y training readiness) de las últimas N semanas, generado por el cron semanal de sincronización con Garmin Connect.",
       { weeks: z.number().int().min(1).max(8).default(2) },
-      async ({ weeks }) => {
-        const context = await getHealthContext(weeks);
+      async ({ weeks }, extra) => {
+        const context = await getHealthContext(athleteOf(extra), weeks);
         return { content: [{ type: "text" as const, text: context }] };
       },
     );
@@ -88,8 +186,8 @@ const mcpHandler = createMcpHandler(
         avgHeartRate: z.number().nullable(),
         avgPaceMinPerKm: z.number().nullable(),
       },
-      async ({ activityId, ...activity }) => {
-        const result = await recordGarminActivity({ id: activityId, ...activity });
+      async ({ activityId, ...activity }, extra) => {
+        const result = await recordGarminActivity(athleteOf(extra), { id: activityId, ...activity });
         return { content: [{ type: "text" as const, text: result }] };
       },
     );
@@ -98,8 +196,8 @@ const mcpHandler = createMcpHandler(
       "set_weekly_workouts_created",
       "Actualiza solo el estado de programación Garmin del plan actual, sin archivarlo de nuevo.",
       { created: z.boolean() },
-      async ({ created }) => {
-        const result = await setWeeklyWorkoutsCreated(created);
+      async ({ created }, extra) => {
+        const result = await setWeeklyWorkoutsCreated(athleteOf(extra), created);
         return { content: [{ type: "text" as const, text: result }] };
       },
     );
@@ -116,9 +214,10 @@ const mcpHandler = createMcpHandler(
             "Targets: pace '3:50-4:00 /km', heart_rate '140-150 bpm', power '350-380 W'.",
         ),
       },
-      async (params) => {
+      async (params, extra) => {
         const result = await createGarminWorkout(
-          params as Parameters<typeof createGarminWorkout>[0],
+          athleteOf(extra),
+          params as Parameters<typeof createGarminWorkout>[1],
         );
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       },
@@ -128,8 +227,8 @@ const mcpHandler = createMcpHandler(
       "get_garmin_recent_activities",
       "Obtiene las últimas N actividades de Garmin Connect (fecha, tipo, distancia, FC media, ritmo medio).",
       { limit: z.number().int().min(1).max(30).default(7) },
-      async ({ limit }) => {
-        const activities = await getGarminRecentActivities(limit);
+      async ({ limit }, extra) => {
+        const activities = await getGarminRecentActivities(athleteOf(extra), limit);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(activities, null, 2) }],
         };
@@ -143,8 +242,8 @@ const mcpHandler = createMcpHandler(
         startDate: z.string().describe("Fecha inicio ISO YYYY-MM-DD"),
         endDate: z.string().describe("Fecha fin ISO YYYY-MM-DD"),
       },
-      async ({ startDate, endDate }) => {
-        const workouts = await getGarminScheduledWorkouts(startDate, endDate);
+      async ({ startDate, endDate }, extra) => {
+        const workouts = await getGarminScheduledWorkouts(athleteOf(extra), startDate, endDate);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(workouts, null, 2) }],
         };
@@ -157,8 +256,8 @@ const mcpHandler = createMcpHandler(
       {
         workoutId: z.number().int().describe("ID numérico del workout en Garmin Connect"),
       },
-      async ({ workoutId }) => {
-        const result = await deleteGarminWorkout(workoutId);
+      async ({ workoutId }, extra) => {
+        const result = await deleteGarminWorkout(athleteOf(extra), workoutId);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         };
@@ -171,29 +270,30 @@ const mcpHandler = createMcpHandler(
       {
         activityId: z.number().int().describe("ID numérico de la actividad en Garmin Connect"),
       },
-      async ({ activityId }) => {
-        const splits = await getGarminActivitySplits(activityId);
+      async ({ activityId }, extra) => {
+        const splits = await getGarminActivitySplits(athleteOf(extra), activityId);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(splits, null, 2) }],
         };
       },
     );
   },
-  {},
+  { instructions: COACH_INSTRUCTIONS },
   { basePath: "/" },
 );
 
 async function verifyToken(_req: Request, bearerToken?: string): Promise<AuthInfo | undefined> {
-  if (bearerToken && bearerToken === process.env.MCP_AUTH_TOKEN) {
-    return { token: bearerToken, clientId: "claude", scopes: [] };
-  }
-  return undefined;
+  if (!bearerToken) return undefined;
+  const athlete = athleteByToken(bearerToken);
+  if (!athlete) return undefined;
+  return { token: bearerToken, clientId: athlete.id, scopes: [], extra: { athleteId: athlete.id } };
 }
 
 const authedHandler = withMcpAuth(
   mcpHandler as (req: Request) => Promise<Response>,
   verifyToken,
-  { resourceUrl: "https://mcp-coach.vercel.app/mcp" },
+  // required: sin esto, una petición sin token llega a las tools sin autenticar.
+  { required: true, resourceUrl: "https://mcp-coach.vercel.app/mcp" },
 );
 
 export const GET = authedHandler;

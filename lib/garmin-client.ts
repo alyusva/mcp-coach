@@ -1,3 +1,5 @@
+import type { Athlete } from "@/lib/athletes";
+
 // Internal base URL: Vercel sets VERCEL_URL automatically (no protocol).
 // For local dev, fall back to localhost.
 function internalBase(): string {
@@ -5,7 +7,11 @@ function internalBase(): string {
   return `http://localhost:${process.env.PORT ?? 3000}`;
 }
 
-async function callGarminBackend<T>(endpoint: string, body: unknown): Promise<T> {
+async function callGarminBackend<T>(
+  athlete: Athlete,
+  endpoint: string,
+  body: Record<string, unknown>,
+): Promise<T> {
   const url = `${internalBase()}/api/garmin/${endpoint}`;
   const res = await fetch(url, {
     method: "POST",
@@ -15,7 +21,16 @@ async function callGarminBackend<T>(endpoint: string, body: unknown): Promise<T>
       // Bypass Vercel Deployment Protection for internal calls between serverless functions
       "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET ?? "",
     },
-    body: JSON.stringify(body),
+    // El backend Python solo confía en esta identidad porque la llamada va firmada
+    // con INTERNAL_API_SECRET; el atleta sale siempre del token MCP, no de la tool.
+    body: JSON.stringify({
+      ...body,
+      athlete: {
+        id: athlete.id,
+        sessionKey: athlete.garminSessionKey,
+        envLogin: athlete.garminEnvLogin,
+      },
+    }),
   });
 
   if (!res.ok) {
@@ -84,6 +99,13 @@ export interface DeleteWorkoutResult {
   message: string;
 }
 
+export interface RescheduleResult {
+  workoutId: number;
+  fromDate: string;
+  toDate: string;
+  message: string;
+}
+
 export interface ActivityLap {
   lapIndex: number;
   type: "warmup" | "active" | "recovery" | "rest" | "cooldown" | "other";
@@ -142,30 +164,40 @@ export interface DailyHealth {
   trainingReadiness: DailyTrainingReadiness | null;
 }
 
-export async function createGarminWorkout(params: CreateWorkoutParams): Promise<CreateWorkoutResult> {
-  return callGarminBackend<CreateWorkoutResult>("create_workout", params);
+export async function createGarminWorkout(athlete: Athlete, params: CreateWorkoutParams): Promise<CreateWorkoutResult> {
+  return callGarminBackend<CreateWorkoutResult>(athlete, "create_workout", { ...params });
 }
 
-export async function getGarminRecentActivities(limit: number): Promise<GarminActivity[]> {
-  return callGarminBackend<GarminActivity[]>("recent_activities", { limit });
+export async function getGarminRecentActivities(athlete: Athlete, limit: number): Promise<GarminActivity[]> {
+  return callGarminBackend<GarminActivity[]>(athlete, "recent_activities", { limit });
 }
 
-export async function getGarminScheduledWorkouts(startDate: string, endDate: string): Promise<ScheduledWorkout[]> {
+export async function getGarminScheduledWorkouts(athlete: Athlete, startDate: string, endDate: string): Promise<ScheduledWorkout[]> {
   const result = await callGarminBackend<{ workouts: ScheduledWorkout[]; count: number }>(
+    athlete,
     "list_scheduled_workouts",
     { startDate, endDate },
   );
   return result.workouts;
 }
 
-export async function deleteGarminWorkout(workoutId: number): Promise<DeleteWorkoutResult> {
-  return callGarminBackend<DeleteWorkoutResult>("delete_workout", { workoutId });
+export async function deleteGarminWorkout(athlete: Athlete, workoutId: number): Promise<DeleteWorkoutResult> {
+  return callGarminBackend<DeleteWorkoutResult>(athlete, "delete_workout", { workoutId });
 }
 
-export async function getGarminActivitySplits(activityId: number): Promise<ActivitySplits> {
-  return callGarminBackend<ActivitySplits>("activity_splits", { activityId });
+export async function getGarminActivitySplits(athlete: Athlete, activityId: number): Promise<ActivitySplits> {
+  return callGarminBackend<ActivitySplits>(athlete, "activity_splits", { activityId });
 }
 
-export async function getGarminHealthData(startDate: string, endDate: string): Promise<DailyHealth[]> {
-  return callGarminBackend<DailyHealth[]>("health_data", { startDate, endDate });
+export async function getGarminHealthData(athlete: Athlete, startDate: string, endDate: string): Promise<DailyHealth[]> {
+  return callGarminBackend<DailyHealth[]>(athlete, "health_data", { startDate, endDate });
+}
+
+export async function rescheduleGarminWorkout(
+  athlete: Athlete,
+  workoutId: number,
+  fromDate: string,
+  toDate: string,
+): Promise<RescheduleResult> {
+  return callGarminBackend<RescheduleResult>(athlete, "reschedule_workout", { workoutId, fromDate, toDate });
 }
