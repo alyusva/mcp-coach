@@ -27,6 +27,8 @@ export interface Athlete {
   garminSessionKey: string;
   /** Si true, puede hacer login en Garmin con GARMIN_EMAIL/GARMIN_PASSWORD. */
   garminEnvLogin: boolean;
+  /** Token de GitHub propio para su repo de memoria (si no, se usa GITHUB_TOKEN). */
+  githubToken: string | null;
   /** Enlace a su proyecto de Claude para el botón del panel (opcional). */
   claudeProjectUrl: string | null;
 }
@@ -63,6 +65,10 @@ function parseAthletes(raw: string): Athlete[] {
     if (!/^garmin:session(:[a-z0-9-]+)?$/.test(garminSessionKey)) {
       fail(`garminSessionKey de "${id}" no válido`);
     }
+    const githubToken = a.githubToken ? String(a.githubToken) : null;
+    if (githubToken !== null && !/^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$/.test(githubToken)) {
+      fail(`githubToken de "${id}" no parece un token de GitHub`);
+    }
     const claudeProjectUrl = a.claudeProjectUrl ? String(a.claudeProjectUrl) : null;
     if (claudeProjectUrl && !/^https:\/\/claude\.ai\//.test(claudeProjectUrl)) {
       fail(`claudeProjectUrl de "${id}" debe empezar por https://claude.ai/`);
@@ -75,6 +81,7 @@ function parseAthletes(raw: string): Athlete[] {
       memoryRepo,
       garminSessionKey,
       garminEnvLogin: a.garminEnvLogin === true,
+      githubToken,
       claudeProjectUrl,
     };
   });
@@ -105,6 +112,7 @@ function legacyAthlete(): Athlete[] {
       memoryRepo,
       garminSessionKey: LEGACY_SESSION_KEY,
       garminEnvLogin: true,
+      githubToken: null,
       claudeProjectUrl: process.env.CLAUDE_PROJECT_URL || null,
     },
   ];
