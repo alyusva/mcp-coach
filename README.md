@@ -162,6 +162,8 @@ y, si se conocen, `config/zonas.md`. Añade el repo al fine-grained PAT de
   y el login automático del despliegue de un solo atleta. Solo un atleta puede
   tener `garminEnvLogin`.
 - Los demás usan `garmin:session:<id>` y nunca guardan contraseña.
+- `githubToken` (opcional): fine-grained PAT con Contents read/write solo sobre el repo de
+  esa persona. Si no está, se usa `GITHUB_TOKEN`.
 - Tokens y PINs no pueden repetirse. Usa PINs largos: hay un límite de 5 intentos
   fallidos por IP cada 15 minutos, pero un PIN de 6 cifras sigue siendo adivinable.
 

@@ -1,10 +1,18 @@
-import type { Athlete } from "@/lib/athletes";
+import { listAthletes, type Athlete } from "@/lib/athletes";
 
 const GITHUB_API = "https://api.github.com";
 
-function headers() {
+/** Token del atleta dueño del repo si tiene uno propio; si no, GITHUB_TOKEN. */
+function tokenFor(repo: string): string {
+  const own = listAthletes().find((a) => a.memoryRepo === repo)?.githubToken;
+  const token = own ?? process.env.GITHUB_TOKEN;
+  if (!token) throw new Error(`No hay token de GitHub para ${repo}`);
+  return token;
+}
+
+function headers(repo: string) {
   return {
-    Authorization: `token ${process.env.GITHUB_TOKEN}`,
+    Authorization: `token ${tokenFor(repo)}`,
     Accept: "application/vnd.github.v3+json",
     "Content-Type": "application/json",
     "User-Agent": "mcp-coach/1.0",
@@ -16,7 +24,7 @@ function repoUrl(repo: string, path: string) {
 }
 
 async function readFile(repo: string, path: string): Promise<{ content: string; sha: string }> {
-  const res = await fetch(repoUrl(repo, path), { headers: headers() });
+  const res = await fetch(repoUrl(repo, path), { headers: headers(repo) });
   if (!res.ok) {
     if (res.status === 404) throw new Error(`FILE_NOT_FOUND:${path}`);
     throw new Error(`GitHub read error ${res.status}: ${await res.text()}`);
@@ -42,7 +50,7 @@ async function writeFile(
 
   const res = await fetch(repoUrl(repo, path), {
     method: "PUT",
-    headers: headers(),
+    headers: headers(repo),
     body: JSON.stringify(body),
   });
 
