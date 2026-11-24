@@ -60,7 +60,7 @@ class handler(BaseHTTPRequestHandler):
                 self._json({"error": "activityId is required"}, 400)
                 return
 
-            client = get_garmin_client()
+            client = get_garmin_client(body)
             raw = client.get_activity_splits(activity_id)
             save_session(client)
 

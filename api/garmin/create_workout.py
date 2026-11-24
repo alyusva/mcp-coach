@@ -191,7 +191,7 @@ class handler(BaseHTTPRequestHandler):
                 self._json({"error": "scheduledDate is required"}, 400)
                 return
 
-            client = get_garmin_client()
+            client = get_garmin_client(body)
             workout_data = build_workout(name, steps)
             result = client.upload_workout(workout_data)
             workout_id = result.get("workoutId") or result.get("detailId")

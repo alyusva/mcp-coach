@@ -1,3 +1,5 @@
+import type { Athlete } from "@/lib/athletes";
+
 const GITHUB_API = "https://api.github.com";
 
 function headers() {
@@ -9,12 +11,12 @@ function headers() {
   };
 }
 
-function repoUrl(path: string) {
-  return `${GITHUB_API}/repos/${process.env.MEMORY_REPO}/contents/${path}`;
+function repoUrl(repo: string, path: string) {
+  return `${GITHUB_API}/repos/${repo}/contents/${path}`;
 }
 
-async function readFile(path: string): Promise<{ content: string; sha: string }> {
-  const res = await fetch(repoUrl(path), { headers: headers() });
+async function readFile(repo: string, path: string): Promise<{ content: string; sha: string }> {
+  const res = await fetch(repoUrl(repo, path), { headers: headers() });
   if (!res.ok) {
     if (res.status === 404) throw new Error(`FILE_NOT_FOUND:${path}`);
     throw new Error(`GitHub read error ${res.status}: ${await res.text()}`);
@@ -26,6 +28,7 @@ async function readFile(path: string): Promise<{ content: string; sha: string }>
 }
 
 async function writeFile(
+  repo: string,
   path: string,
   content: string,
   sha: string | null,
@@ -37,7 +40,7 @@ async function writeFile(
   };
   if (sha) body.sha = sha;
 
-  const res = await fetch(repoUrl(path), {
+  const res = await fetch(repoUrl(repo, path), {
     method: "PUT",
     headers: headers(),
     body: JSON.stringify(body),
@@ -87,25 +90,40 @@ export interface GarminActivityRecord {
   avgPaceMinPerKm: number | null;
 }
 
-export async function getTrainingContext(): Promise<string> {
-  const [zonas, objetivos, metodologia, planGlobal, planActual] = await Promise.all([
-    readFile("config/zonas.md"),
-    readFile("config/objetivos.md"),
-    readFile("config/metodologia.md").catch(() => ({ content: "_Sin contrato de datos_" })),
-    readFile("plan/plan-global.md").catch(() => ({ content: "_Sin plan global_" })),
-    readFile("plan/semana-actual.md"),
+/** Instrucciones propias del coach de cada atleta (config/coach.md), o null si no hay. */
+export async function getCoachInstructions(athlete: Athlete): Promise<string | null> {
+  try {
+    return (await readFile(athlete.memoryRepo, "config/coach.md")).content;
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("FILE_NOT_FOUND")) return null;
+    throw e;
+  }
+}
+
+export async function getTrainingContext(athlete: Athlete): Promise<string> {
+  const repo = athlete.memoryRepo;
+  const [coach, zonas, objetivos, metodologia, planGlobal, planActual] = await Promise.all([
+    getCoachInstructions(athlete),
+    readFile(repo, "config/zonas.md"),
+    readFile(repo, "config/objetivos.md"),
+    readFile(repo, "config/metodologia.md").catch(() => ({ content: "_Sin contrato de datos_" })),
+    readFile(repo, "plan/plan-global.md").catch(() => ({ content: "_Sin plan global_" })),
+    readFile(repo, "plan/semana-actual.md"),
   ]);
 
   return [
+    `# ATLETA\n\n${athlete.name}`,
+    ...(coach ? [`# INSTRUCCIONES DEL COACH\n\n${coach}`] : []),
     `# ZONAS DE ENTRENAMIENTO\n\n${zonas.content}`,
     `# OBJETIVOS\n\n${objetivos.content}`,
     `# METODOLOGÍA Y CONTRATO DE DATOS\n\n${metodologia.content}`,
-    `# PLAN GLOBAL (9 semanas)\n\n${planGlobal.content}`,
+    `# PLAN GLOBAL\n\n${planGlobal.content}`,
     `# PLAN SEMANA ACTUAL\n\n${planActual.content}`,
   ].join("\n\n---\n\n");
 }
 
-export async function updateWeeklyPlan(newContent: string): Promise<string> {
+export async function updateWeeklyPlan(athlete: Athlete, newContent: string): Promise<string> {
+  const repo = athlete.memoryRepo;
   const { year, week } = isoWeek(new Date());
   const label = weekLabel(year, week);
   const logPath = `log/${label}.md`;
@@ -113,7 +131,7 @@ export async function updateWeeklyPlan(newContent: string): Promise<string> {
   // Read current plan (may not exist yet)
   let currentPlan: { content: string; sha: string } | null = null;
   try {
-    currentPlan = await readFile("plan/semana-actual.md");
+    currentPlan = await readFile(repo, "plan/semana-actual.md");
   } catch (e) {
     if (!(e instanceof Error && e.message.startsWith("FILE_NOT_FOUND"))) throw e;
   }
@@ -123,7 +141,7 @@ export async function updateWeeklyPlan(newContent: string): Promise<string> {
     let logSha: string | null = null;
     let logExisting = "";
     try {
-      const log = await readFile(logPath);
+      const log = await readFile(repo, logPath);
       logSha = log.sha;
       logExisting = log.content;
     } catch (e) {
@@ -135,11 +153,12 @@ export async function updateWeeklyPlan(newContent: string): Promise<string> {
       ? `${logExisting}\n\n---\n\n${archiveHeader}\n\n${currentPlan.content}`
       : `# Log semana ${label}\n\n${archiveHeader}\n\n${currentPlan.content}`;
 
-    await writeFile(logPath, archiveContent, logSha, `archive: plan ${label}`);
+    await writeFile(repo, logPath, archiveContent, logSha, `archive: plan ${label}`);
   }
 
   // Write new plan
   await writeFile(
+    repo,
     "plan/semana-actual.md",
     newContent,
     currentPlan?.sha ?? null,
@@ -149,7 +168,8 @@ export async function updateWeeklyPlan(newContent: string): Promise<string> {
   return `✓ Plan actualizado para ${label}. Plan anterior archivado en ${logPath}.`;
 }
 
-export async function appendTrainingLog(entry: string): Promise<string> {
+export async function appendTrainingLog(athlete: Athlete, entry: string): Promise<string> {
+  const repo = athlete.memoryRepo;
   const { year, week } = isoWeek(new Date());
   const label = weekLabel(year, week);
   const logPath = `log/${label}.md`;
@@ -158,7 +178,7 @@ export async function appendTrainingLog(entry: string): Promise<string> {
   let sha: string | null = null;
   let existing = "";
   try {
-    const log = await readFile(logPath);
+    const log = await readFile(repo, logPath);
     sha = log.sha;
     existing = log.content;
   } catch (e) {
@@ -169,13 +189,14 @@ export async function appendTrainingLog(entry: string): Promise<string> {
     ? `${existing}\n\n---\n\n## Entreno ${today}\n\n${entry}`
     : `# Log semana ${label}\n\n## Entreno ${today}\n\n${entry}`;
 
-  await writeFile(logPath, newContent, sha, `log: entreno ${today}`);
+  await writeFile(repo, logPath, newContent, sha, `log: entreno ${today}`);
 
   return `✓ Entrada añadida al log ${logPath}.`;
 }
 
 /** Persiste una actividad observada exactamente como la devuelve Garmin. */
-export async function recordGarminActivity(activity: GarminActivityRecord): Promise<string> {
+export async function recordGarminActivity(athlete: Athlete, activity: GarminActivityRecord): Promise<string> {
+  const repo = athlete.memoryRepo;
   const activityDate = new Date(`${activity.date.slice(0, 10)}T12:00:00Z`);
   if (Number.isNaN(activityDate.getTime())) throw new Error("Fecha de actividad Garmin inválida");
 
@@ -187,7 +208,7 @@ export async function recordGarminActivity(activity: GarminActivityRecord): Prom
   let sha: string | null = null;
   let existing = "";
   try {
-    const log = await readFile(logPath);
+    const log = await readFile(repo, logPath);
     sha = log.sha;
     existing = log.content;
   } catch (e) {
@@ -217,38 +238,41 @@ export async function recordGarminActivity(activity: GarminActivityRecord): Prom
     ? `${existing}\n\n---\n\n${content}`
     : `# Log semana ${label}\n\n${content}`;
 
-  await writeFile(logPath, newContent, sha, `log: Garmin actividad ${activity.id}`);
+  await writeFile(repo, logPath, newContent, sha, `log: Garmin actividad ${activity.id}`);
   return `✓ Actividad Garmin ${activity.id} registrada en ${logPath}.`;
 }
 
 /** Cambia el estado de programación sin archivar de nuevo toda la semana. */
-export async function setWeeklyWorkoutsCreated(created: boolean): Promise<string> {
-  const plan = await readFile("plan/semana-actual.md");
+export async function setWeeklyWorkoutsCreated(athlete: Athlete, created: boolean): Promise<string> {
+  const repo = athlete.memoryRepo;
+  const plan = await readFile(repo, "plan/semana-actual.md");
   const marker = `workouts_created: ${created}`;
   const content = /workouts_created:\s*(true|false)/.test(plan.content)
     ? plan.content.replace(/workouts_created:\s*(true|false)/, marker)
     : `${plan.content.trimEnd()}\n\n${marker}\n`;
 
-  await writeFile("plan/semana-actual.md", content, plan.sha, `plan: workouts ${created ? "created" : "pending"}`);
+  await writeFile(repo, "plan/semana-actual.md", content, plan.sha, `plan: workouts ${created ? "created" : "pending"}`);
   return `✓ Estado de workouts actualizado a ${created}.`;
 }
 
 /** Sobrescribe la tabla de salud semanal; el cron puede reintentarse sin duplicarla. */
-export async function writeHealthLog(content: string): Promise<string> {
+export async function writeHealthLog(athlete: Athlete, content: string): Promise<string> {
+  const repo = athlete.memoryRepo;
   const { year, week } = isoWeek(new Date());
   const label = weekLabel(year, week);
   const healthPath = `health/${label}.md`;
   let sha: string | null = null;
   try {
-    sha = (await readFile(healthPath)).sha;
+    sha = (await readFile(repo, healthPath)).sha;
   } catch (e) {
     if (!(e instanceof Error && e.message.startsWith("FILE_NOT_FOUND"))) throw e;
   }
-  await writeFile(healthPath, content, sha, `health: semana ${label}`);
+  await writeFile(repo, healthPath, content, sha, `health: semana ${label}`);
   return `✓ Datos de salud escritos en ${healthPath}.`;
 }
 
-export async function getHealthContext(weeks = 2): Promise<string> {
+export async function getHealthContext(athlete: Athlete, weeks = 2): Promise<string> {
+  const repo = athlete.memoryRepo;
   const now = new Date();
   const labels = Array.from({ length: weeks }, (_, index) => {
     const date = new Date(now);
@@ -258,7 +282,7 @@ export async function getHealthContext(weeks = 2): Promise<string> {
   });
   const files = await Promise.all(
     [...new Set(labels)].map((label) =>
-      readFile(`health/${label}.md`).then((file) => file.content).catch(() => null),
+      readFile(repo, `health/${label}.md`).then((file) => file.content).catch(() => null),
     ),
   );
   const found = files.filter((content): content is string => content !== null);

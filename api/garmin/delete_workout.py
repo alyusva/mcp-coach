@@ -27,7 +27,7 @@ class handler(BaseHTTPRequestHandler):
                 self._json({"error": "workoutId is required"}, 400)
                 return
 
-            client = get_garmin_client()
+            client = get_garmin_client(body)
             client.delete_workout(workout_id)
             save_session(client)
 

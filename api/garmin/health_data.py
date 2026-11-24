@@ -114,7 +114,7 @@ class handler(BaseHTTPRequestHandler):
                 self._json({"error": "startDate and endDate are required"}, 400)
                 return
 
-            client = get_garmin_client()
+            client = get_garmin_client(body)
 
             # Body Battery se pide de una vez para todo el rango
             battery_raw = safe(client.get_body_battery, start_date, end_date)

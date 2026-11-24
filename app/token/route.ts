@@ -1,4 +1,5 @@
 import { type NextRequest } from "next/server";
+import { getAthlete } from "@/lib/athletes";
 import { validateCode } from "@/lib/oauth-codes";
 
 export async function POST(req: NextRequest) {
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest) {
     body = await req.json().catch(() => ({}));
   }
 
-  const { grant_type, code, redirect_uri } = body;
+  const { grant_type, code, redirect_uri, code_verifier } = body;
 
   if (grant_type !== "authorization_code") {
     return Response.json({ error: "unsupported_grant_type" }, { status: 400 });
@@ -20,13 +21,15 @@ export async function POST(req: NextRequest) {
   if (!code || !redirect_uri) {
     return Response.json({ error: "invalid_request" }, { status: 400 });
   }
-  if (!validateCode(code, redirect_uri)) {
+  const athleteId = validateCode(code, redirect_uri, code_verifier);
+  const athlete = athleteId ? getAthlete(athleteId) : undefined;
+  if (!athlete) {
     return Response.json({ error: "invalid_grant" }, { status: 400 });
   }
 
   return Response.json(
     {
-      access_token: process.env.MCP_AUTH_TOKEN,
+      access_token: athlete.token,
       token_type: "Bearer",
       expires_in: 60 * 60 * 24 * 30, // 30 days
     },

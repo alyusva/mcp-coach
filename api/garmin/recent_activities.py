@@ -46,7 +46,7 @@ class handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length)) if length else {}
             limit = min(int(body.get("limit", 7)), 30)
 
-            client = get_garmin_client()
+            client = get_garmin_client(body)
             raw = client.get_activities(0, limit)
             save_session(client)  # persist any token refresh garth did automatically
             activities = [normalize(a) for a in (raw or [])]
