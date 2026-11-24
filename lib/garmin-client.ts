@@ -99,6 +99,13 @@ export interface DeleteWorkoutResult {
   message: string;
 }
 
+export interface RescheduleResult {
+  workoutId: number;
+  fromDate: string;
+  toDate: string;
+  message: string;
+}
+
 export interface ActivityLap {
   lapIndex: number;
   type: "warmup" | "active" | "recovery" | "rest" | "cooldown" | "other";
@@ -184,4 +191,13 @@ export async function getGarminActivitySplits(athlete: Athlete, activityId: numb
 
 export async function getGarminHealthData(athlete: Athlete, startDate: string, endDate: string): Promise<DailyHealth[]> {
   return callGarminBackend<DailyHealth[]>(athlete, "health_data", { startDate, endDate });
+}
+
+export async function rescheduleGarminWorkout(
+  athlete: Athlete,
+  workoutId: number,
+  fromDate: string,
+  toDate: string,
+): Promise<RescheduleResult> {
+  return callGarminBackend<RescheduleResult>(athlete, "reschedule_workout", { workoutId, fromDate, toDate });
 }

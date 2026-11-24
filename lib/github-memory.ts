@@ -342,3 +342,48 @@ export async function getHealthContext(athlete: Athlete, weeks = 2): Promise<str
   const found = files.filter((content): content is string => content !== null);
   return found.length > 0 ? found.reverse().join("\n\n---\n\n") : "_Sin datos de salud registrados aún._";
 }
+
+/**
+ * Reescribe el plan de la semana en curso sin archivarlo (cambios a mitad de
+ * semana) y deja constancia del cambio en el log de la semana.
+ */
+export async function reviseCurrentWeek(athlete: Athlete, content: string, note: string): Promise<string> {
+  const repo = athlete.memoryRepo;
+  if (!content.trim()) throw new Error("El plan no puede estar vacío");
+  const plan = await readOptional(repo, "plan/semana-actual.md");
+  await writeFile(repo, "plan/semana-actual.md", content, plan?.sha ?? null, "plan: ajuste de la semana");
+
+  const { year, week } = isoWeek(new Date());
+  const label = weekLabel(year, week);
+  const logPath = `log/${label}.md`;
+  const log = await readOptional(repo, logPath);
+  const today = new Date().toISOString().split("T")[0];
+  const entry = `## Ajuste del plan ${today}\n\n${note.trim()}`;
+  const newLog = log ? `${log.content}\n\n---\n\n${entry}` : `# Log semana ${label}\n\n${entry}`;
+  await writeFile(repo, logPath, newLog, log?.sha ?? null, `log: ajuste del plan ${today}`);
+  return `✓ Plan de la semana actualizado y cambio anotado en ${logPath}.`;
+}
+
+/** Último resumen de la revisión semanal automática (lo muestra el panel). */
+export async function writeWeeklySummary(athlete: Athlete, summary: string): Promise<void> {
+  const repo = athlete.memoryRepo;
+  const path = "plan/resumen-semanal.md";
+  const current = await readOptional(repo, path);
+  const today = new Date().toISOString().split("T")[0];
+  const content = `# Resumen de la revisión semanal (${today})\n\n${summary.trim()}\n`;
+  await writeFile(repo, path, content, current?.sha ?? null, `resumen: revisión ${today}`);
+}
+
+/** Documentos que enseña el panel. Lo que falte vuelve como null. */
+export async function getPanelDocs(athlete: Athlete): Promise<Record<"objetivos" | "disponibilidad" | "semana" | "resumen" | "planGlobal", string | null>> {
+  const repo = athlete.memoryRepo;
+  const read = async (path: string) => (await readOptional(repo, path))?.content ?? null;
+  const [objetivos, disponibilidad, semana, resumen, planGlobal] = await Promise.all([
+    read("config/objetivos.md"),
+    read("config/disponibilidad.md"),
+    read("plan/semana-actual.md"),
+    read("plan/resumen-semanal.md"),
+    read("plan/plan-global.md"),
+  ]);
+  return { objetivos, disponibilidad, semana, resumen, planGlobal };
+}

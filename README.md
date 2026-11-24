@@ -29,6 +29,7 @@ Claude (conversación)
 | `set_availability` | Guarda la disponibilidad habitual (`config/disponibilidad.md`) |
 | `save_global_plan` | Guarda el plan por bloques (`plan/plan-global.md`), archivando el anterior |
 | `update_weekly_plan` | Escribe nuevo plan; archiva el anterior en `log/` |
+| `adjust_week` | Mueve workouts de la semana en Garmin y guarda el plan corregido con una nota en el log |
 | `append_training_log` | Añade entrada al log semanal (no sobrescribe) |
 | `get_health_context` | Lee el histórico de salud (sueño, HRV, body battery, FC reposo, estrés, training readiness) de las últimas N semanas |
 | `create_garmin_workout` | Crea y programa un workout estructurado en Garmin Connect |
@@ -153,7 +154,7 @@ y, si se conocen, `config/zonas.md`. Añade el repo al fine-grained PAT de
   {"id": "alvaro", "name": "Álvaro", "token": "<openssl rand -hex 32>", "pin": "<pin largo>",
    "memoryRepo": "usuario/mcp-coach-memory", "garminSessionKey": "garmin:session", "garminEnvLogin": true},
   {"id": "mama", "name": "Mamá", "token": "<otro token>", "pin": "<otro pin>",
-   "memoryRepo": "usuario/coach-memory-mama"}
+   "memoryRepo": "usuario/coach-memory-mama", "claudeProjectUrl": "https://claude.ai/project/<id>"}
 ]
 ```
 
@@ -187,12 +188,28 @@ abre la página de autorizar, escribe su PIN y queda enlazada a su memoria y su
 Garmin. Recomendable crear un proyecto de Claude con instrucciones breves ("eres mi
 entrenador, usa el conector mcp-coach para ver mis datos y mi plan").
 
-### 5. Crons
+### 5. Panel
+
+`https://<tu-proyecto>.vercel.app/panel` pide el PIN de la persona y le enseña su
+plan de la semana, lo programado en Garmin para los próximos 7 días, el último
+resumen de la revisión semanal, su objetivo y su disponibilidad. El botón "Hablar
+con mi coach" abre `claudeProjectUrl` (su proyecto de Claude) si está en `ATHLETES`.
+La sesión del panel es una cookie firmada de 30 días.
+
+### 6. Crons
 
 `health-sync` y `weekly-review` recorren todos los atletas en paralelo. Para
 relanzar uno solo: `curl -H "Authorization: Bearer $CRON_SECRET" "https://<host>/api/cron/weekly-review?athlete=mama"`.
 El prompt de la revisión semanal es común y se completa con `config/coach.md` de
-cada persona.
+cada persona. Planifica solo en los días de `config/disponibilidad.md` y guarda su
+resumen en `plan/resumen-semanal.md`, que se ve en el panel.
+
+### Cómo se usa (flujo del coach)
+
+1. La primera vez, el coach pregunta el objetivo y los días disponibles y los guarda.
+2. Propone un plan por bloques, lo enseña y lo guarda solo cuando la persona lo aprueba; se puede iterar.
+3. Cada semana (cron o conversación) analiza lo hecho, planifica la siguiente en los días disponibles y crea los workouts en Garmin.
+4. Si una semana no puede algún día, se le dice al coach qué días sí; propone cómo recolocar y, con el visto bueno, `adjust_week` mueve los workouts en Garmin y actualiza la memoria.
 
 ## Notas sobre el paquete MCP
 

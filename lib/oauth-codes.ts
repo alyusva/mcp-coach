@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-function key(): string {
+export function signingKey(): string {
   const secret = process.env.OAUTH_SIGNING_SECRET || process.env.INTERNAL_API_SECRET;
   if (secret) return secret;
   if (process.env.NODE_ENV !== "production") return "dev-insecure-key";
@@ -19,7 +19,7 @@ interface CodePayload {
 }
 
 function sign(payload: string): string {
-  return crypto.createHmac("sha256", key()).update(payload).digest("base64url");
+  return crypto.createHmac("sha256", signingKey()).update(payload).digest("base64url");
 }
 
 export function generateCode(params: {

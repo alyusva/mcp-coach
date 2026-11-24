@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { listAthletes, type Athlete } from "@/lib/athletes";
 import {
   getCoachInstructions,
+  writeWeeklySummary,
   getTrainingContext,
   updateWeeklyPlan,
   getHealthContext,
@@ -55,7 +56,7 @@ const WEEKLY_REVIEW_PROMPT = `Es lunes. Ejecuta la revisión semanal completa:
 6. Escribe el plan completo con update_weekly_plan. Incluye al final: "workouts_created: false".
 7. Si workouts_created era false (o no existía), crea los workouts y llama a set_weekly_workouts_created con created: true. No llames de nuevo a update_weekly_plan.
 
-Cuando termines, responde con un resumen: sesiones registradas, tendencia de salud observada, plan escrito, workouts creados (o saltados por ya existir).`;
+Cuando termines, responde con un resumen dirigido al atleta, en lenguaje claro y breve: qué hizo la semana pasada, cómo viene de salud, qué toca esta semana día a día y si los workouts ya están en Garmin. Termina recordándole que si algún día no le viene bien puede pedirle al coach que lo mueva. Este resumen se guarda en su memoria y se le muestra en su panel.`;
 
 const TOOLS: Anthropic.Tool[] = [
   {
@@ -257,6 +258,7 @@ async function reviewAthlete(athlete: Athlete): Promise<string> {
     }
   }
 
+  if (summary.trim()) await writeWeeklySummary(athlete, summary);
   return summary;
 }
 

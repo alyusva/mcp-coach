@@ -8,6 +8,7 @@ import {
   setGoal,
   setAvailability,
   saveGlobalPlan,
+  reviseCurrentWeek,
   appendTrainingLog,
   getHealthContext,
   recordGarminActivity,
@@ -19,6 +20,7 @@ import {
   getGarminScheduledWorkouts,
   deleteGarminWorkout,
   getGarminActivitySplits,
+  rescheduleGarminWorkout,
 } from "@/lib/garmin-client";
 
 const GarminStepSchema: z.ZodType<object> = z.lazy(() =>
@@ -53,8 +55,9 @@ const COACH_INSTRUCTIONS = `Eres el entrenador de running (o caminata) de la per
 Flujo:
 1. Si falta el objetivo o la disponibilidad, pregúntalos antes de planificar: qué quiere conseguir y para cuándo, punto de partida, qué días y a qué hora puede entrenar normalmente, cuánto tiempo y qué día prefiere para la sesión larga. Resume lo entendido, pide confirmación y guárdalo con set_goal y set_availability.
 2. Con objetivo y disponibilidad, propón un plan por bloques hasta el objetivo. Enséñalo, pregunta si encaja y ajusta lo que pida. Guárdalo con save_global_plan solo cuando lo apruebe.
-3. Concreta la semana siguiente con update_weekly_plan, solo en los días disponibles, y crea los workouts en Garmin cuando el atleta lo confirme.
-4. Si cambia algo (otro objetivo, otros días, molestias), ajusta y vuelve a guardar lo que corresponda. Nunca sobrescribas objetivo, disponibilidad o plan sin su visto bueno.
+3. Concreta la semana siguiente con update_weekly_plan, solo en los días disponibles, y crea los workouts en Garmin cuando el atleta lo confirme. El plan semanal lleva una tabla por día (Fecha | Día | Sesión | Garmin) con el workoutId de cada sesión creada.
+4. Si esta semana no puede algún día, pregunta qué días sí puede, propón cómo recolocar las sesiones (sin dos sesiones duras seguidas) y, con su visto bueno, aplícalo con adjust_week, que mueve los workouts en Garmin y actualiza la memoria.
+5. Si cambia algo (otro objetivo, otros días, molestias), ajusta y vuelve a guardar lo que corresponda. Nunca sobrescribas objetivo, disponibilidad o plan sin su visto bueno.
 
 Respeta config/coach.md, que manda sobre estas pautas. Habla claro y en español.`;
 
@@ -97,6 +100,46 @@ const mcpHandler = createMcpHandler(
       async ({ content }, extra) => {
         const result = await saveGlobalPlan(athleteOf(extra), content);
         return { content: [{ type: "text" as const, text: result }] };
+      },
+    );
+
+    server.tool(
+      "adjust_week",
+      "Ajusta la semana en curso cuando el atleta cambia de días o de sesiones: mueve en Garmin los workouts indicados y guarda el plan semanal corregido (sin archivarlo) con una nota en el log. Primero consulta get_garmin_scheduled_workouts para los workoutId, propón el cambio respetando descansos y disponibilidad, y llámalo cuando el atleta lo confirme. Si algún movimiento en Garmin falla, el plan no se guarda.",
+      {
+        moves: z
+          .array(
+            z.object({
+              workoutId: z.number().int().describe("ID del workout en Garmin"),
+              fromDate: z.string().describe("Fecha actual YYYY-MM-DD"),
+              toDate: z.string().describe("Fecha nueva YYYY-MM-DD"),
+            }),
+          )
+          .max(14)
+          .describe("Movimientos en Garmin; vacío si solo cambia el plan escrito"),
+        updatedPlan: z.string().describe("Markdown completo del plan de la semana ya corregido"),
+        reason: z.string().describe("Qué ha cambiado y por qué, para el log"),
+      },
+      async ({ moves, updatedPlan, reason }, extra) => {
+        const athlete = athleteOf(extra);
+        const done: string[] = [];
+        for (const move of moves) {
+          try {
+            const r = await rescheduleGarminWorkout(athlete, move.workoutId, move.fromDate, move.toDate);
+            done.push(r.message);
+          } catch (e) {
+            const text = [
+              ...done.map((m) => `✓ ${m}`),
+              `✗ Workout ${move.workoutId} (${move.fromDate} → ${move.toDate}): ${e instanceof Error ? e.message : String(e)}`,
+              "El plan escrito NO se ha guardado. Revisa con get_garmin_scheduled_workouts y corrige antes de reintentar.",
+            ].join("\n");
+            return { content: [{ type: "text" as const, text }], isError: true };
+          }
+        }
+        const note = [reason.trim(), ...done.map((m) => `- ${m}`)].join("\n");
+        const saved = await reviseCurrentWeek(athlete, updatedPlan, note);
+        const text = [...done.map((m) => `✓ ${m}`), saved].join("\n");
+        return { content: [{ type: "text" as const, text }] };
       },
     );
 

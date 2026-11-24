@@ -21,7 +21,10 @@ import re
 import urllib.parse
 import urllib.request
 
-import garth
+try:
+    import garth  # garminconnect < 0.3
+except ImportError:  # pragma: no cover
+    garth = None  # type: ignore[assignment]
 from garminconnect import Garmin
 
 LEGACY_KEY = "garmin:session"
@@ -84,7 +87,15 @@ def decrypt_session(stored: str, redis_key: str) -> str:
     return AESGCM(key).decrypt(blob[:12], blob[12:], redis_key.encode()).decode()
 
 
+def _is_v03(client: Garmin) -> bool:
+    """garminconnect >= 0.3 no longer uses garth: tokens live in client.client."""
+    inner = getattr(client, "client", None)
+    return inner is not None and hasattr(inner, "dumps") and hasattr(inner, "loads")
+
+
 def _dump(client: Garmin) -> str:
+    if _is_v03(client):
+        return client.client.dumps()  # type: ignore[attr-defined]
     try:
         return client.garth.dumps()
     except AttributeError:
@@ -92,6 +103,10 @@ def _dump(client: Garmin) -> str:
 
 
 def _load(client: Garmin, data: str) -> None:
+    if _is_v03(client):
+        # A JSON string as tokenstore loads the tokens and verifies the session.
+        client.login(data)
+        return
     try:
         client.garth.loads(data)
     except AttributeError:

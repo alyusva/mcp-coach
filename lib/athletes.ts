@@ -27,6 +27,8 @@ export interface Athlete {
   garminSessionKey: string;
   /** Si true, puede hacer login en Garmin con GARMIN_EMAIL/GARMIN_PASSWORD. */
   garminEnvLogin: boolean;
+  /** Enlace a su proyecto de Claude para el botón del panel (opcional). */
+  claudeProjectUrl: string | null;
 }
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -61,6 +63,10 @@ function parseAthletes(raw: string): Athlete[] {
     if (!/^garmin:session(:[a-z0-9-]+)?$/.test(garminSessionKey)) {
       fail(`garminSessionKey de "${id}" no válido`);
     }
+    const claudeProjectUrl = a.claudeProjectUrl ? String(a.claudeProjectUrl) : null;
+    if (claudeProjectUrl && !/^https:\/\/claude\.ai\//.test(claudeProjectUrl)) {
+      fail(`claudeProjectUrl de "${id}" debe empezar por https://claude.ai/`);
+    }
     return {
       id,
       name: String(a.name ?? id),
@@ -69,6 +75,7 @@ function parseAthletes(raw: string): Athlete[] {
       memoryRepo,
       garminSessionKey,
       garminEnvLogin: a.garminEnvLogin === true,
+      claudeProjectUrl,
     };
   });
 
@@ -98,6 +105,7 @@ function legacyAthlete(): Athlete[] {
       memoryRepo,
       garminSessionKey: LEGACY_SESSION_KEY,
       garminEnvLogin: true,
+      claudeProjectUrl: process.env.CLAUDE_PROJECT_URL || null,
     },
   ];
 }
