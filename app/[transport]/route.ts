@@ -5,6 +5,9 @@ import { athleteByToken, getAthlete, type Athlete } from "@/lib/athletes";
 import {
   getTrainingContext,
   updateWeeklyPlan,
+  setGoal,
+  setAvailability,
+  saveGlobalPlan,
   appendTrainingLog,
   getHealthContext,
   recordGarminActivity,
@@ -45,6 +48,16 @@ function athleteOf(extra: { authInfo?: AuthInfo }): Athlete {
   return athlete;
 }
 
+const COACH_INSTRUCTIONS = `Eres el entrenador de running (o caminata) de la persona conectada. Empieza siempre con get_training_context.
+
+Flujo:
+1. Si falta el objetivo o la disponibilidad, pregúntalos antes de planificar: qué quiere conseguir y para cuándo, punto de partida, qué días y a qué hora puede entrenar normalmente, cuánto tiempo y qué día prefiere para la sesión larga. Resume lo entendido, pide confirmación y guárdalo con set_goal y set_availability.
+2. Con objetivo y disponibilidad, propón un plan por bloques hasta el objetivo. Enséñalo, pregunta si encaja y ajusta lo que pida. Guárdalo con save_global_plan solo cuando lo apruebe.
+3. Concreta la semana siguiente con update_weekly_plan, solo en los días disponibles, y crea los workouts en Garmin cuando el atleta lo confirme.
+4. Si cambia algo (otro objetivo, otros días, molestias), ajusta y vuelve a guardar lo que corresponda. Nunca sobrescribas objetivo, disponibilidad o plan sin su visto bueno.
+
+Respeta config/coach.md, que manda sobre estas pautas. Habla claro y en español.`;
+
 const mcpHandler = createMcpHandler(
   (server) => {
     server.tool(
@@ -54,6 +67,36 @@ const mcpHandler = createMcpHandler(
       async (_args, extra) => {
         const context = await getTrainingContext(athleteOf(extra));
         return { content: [{ type: "text" as const, text: context }] };
+      },
+    );
+
+    server.tool(
+      "set_goal",
+      "Guarda el objetivo del atleta (config/objetivos.md): qué quiere conseguir, para cuándo y su punto de partida. Sustituye el anterior (que queda archivado). Úsalo solo cuando el atleta haya confirmado el texto.",
+      { content: z.string().describe("Markdown completo de objetivos") },
+      async ({ content }, extra) => {
+        const result = await setGoal(athleteOf(extra), content);
+        return { content: [{ type: "text" as const, text: result }] };
+      },
+    );
+
+    server.tool(
+      "set_availability",
+      "Guarda la disponibilidad habitual del atleta (config/disponibilidad.md): qué días puede entrenar, a qué hora, cuánto tiempo, día preferido para la sesión larga y días que nunca puede. Úsalo solo con la confirmación del atleta.",
+      { content: z.string().describe("Markdown completo de disponibilidad") },
+      async ({ content }, extra) => {
+        const result = await setAvailability(athleteOf(extra), content);
+        return { content: [{ type: "text" as const, text: result }] };
+      },
+    );
+
+    server.tool(
+      "save_global_plan",
+      "Guarda el plan por bloques hasta el objetivo (plan/plan-global.md). Sustituye el anterior (que queda archivado). Enséñaselo antes al atleta y guárdalo solo cuando lo apruebe; vuelve a llamarlo con cada iteración aprobada.",
+      { content: z.string().describe("Markdown completo del plan global") },
+      async ({ content }, extra) => {
+        const result = await saveGlobalPlan(athleteOf(extra), content);
+        return { content: [{ type: "text" as const, text: result }] };
       },
     );
 
@@ -192,7 +235,7 @@ const mcpHandler = createMcpHandler(
       },
     );
   },
-  {},
+  { instructions: COACH_INSTRUCTIONS },
   { basePath: "/" },
 );
 

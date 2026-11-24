@@ -31,7 +31,7 @@ Ejecutas una vez por semana, justo después de que un cron independiente (health
 2. Leer las actividades de Garmin de los últimos 14 días.
 3. Registrar exclusivamente los datos observados de cada sesión de la semana pasada. No inventes, infieras ni completes métricas ausentes.
 4. Analizar qué se hizo vs qué estaba planificado, separando "hechos observados" de "interpretación". Si una sesión no aparece en Garmin, di "no observada"; nunca "no realizada". Cruza la evidencia con salud: HRV bajo, sueño pobre repetido o Training Readiness bajo sostenido cuentan como fatiga severa.
-5. Generar el plan de la semana siguiente. Si hay plan global, síguelo estrictamente; si no, progresa de forma prudente según objetivos y metodología.
+5. Generar el plan de la semana siguiente SOLO en los días de la disponibilidad del atleta (sección DISPONIBILIDAD), con la sesión larga en su día preferido. Si hay plan global, síguelo; si no, progresa de forma prudente según objetivos y metodología. Si no hay objetivo, no inventes uno: plan suave de mantenimiento y anótalo.
 6. Escribir el plan con update_weekly_plan en formato markdown completo.
 7. SOLO SI el plan actual indica "workouts_created: false": crear en Garmin UN workout por cada sesión programada. Si ya indica "workouts_created: true", NO crear workouts (ya existen).
 

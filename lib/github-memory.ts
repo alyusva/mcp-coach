@@ -90,6 +90,58 @@ export interface GarminActivityRecord {
   avgPaceMinPerKm: number | null;
 }
 
+const MISSING_GOAL = "_Sin objetivo definido. Pregunta al atleta qué quiere conseguir y guárdalo con set_goal._";
+const MISSING_AVAILABILITY =
+  "_Sin disponibilidad definida. Pregunta qué días y a qué hora suele poder entrenar y guárdalo con set_availability._";
+
+async function readOptional(repo: string, path: string): Promise<{ content: string; sha: string } | null> {
+  try {
+    return await readFile(repo, path);
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("FILE_NOT_FOUND")) return null;
+    throw e;
+  }
+}
+
+/**
+ * Sobrescribe un documento de memoria. Si ya existía y se indica archiveDir,
+ * guarda antes una copia fechada (además del historial de Git, para que el
+ * coach pueda leer versiones anteriores sin ir a los commits).
+ */
+async function replaceDoc(
+  athlete: Athlete,
+  path: string,
+  content: string,
+  message: string,
+  archiveDir?: string,
+): Promise<string> {
+  const repo = athlete.memoryRepo;
+  if (!content.trim()) throw new Error("El contenido no puede estar vacío");
+  const current = await readOptional(repo, path);
+  let archived = "";
+  if (current && archiveDir && current.content.trim()) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const name = path.split("/").pop()!.replace(/\.md$/, "");
+    const archivePath = `${archiveDir}/${name}-${stamp}.md`;
+    await writeFile(repo, archivePath, current.content, null, `archive: ${path}`);
+    archived = ` Versión anterior archivada en ${archivePath}.`;
+  }
+  await writeFile(repo, path, content, current?.sha ?? null, message);
+  return `✓ ${path} actualizado.${archived}`;
+}
+
+export async function setGoal(athlete: Athlete, content: string): Promise<string> {
+  return replaceDoc(athlete, "config/objetivos.md", content, "objetivo: actualizado", "config/archivo");
+}
+
+export async function setAvailability(athlete: Athlete, content: string): Promise<string> {
+  return replaceDoc(athlete, "config/disponibilidad.md", content, "disponibilidad: actualizada");
+}
+
+export async function saveGlobalPlan(athlete: Athlete, content: string): Promise<string> {
+  return replaceDoc(athlete, "plan/plan-global.md", content, "plan global: actualizado", "plan/archivo");
+}
+
 /** Instrucciones propias del coach de cada atleta (config/coach.md), o null si no hay. */
 export async function getCoachInstructions(athlete: Athlete): Promise<string | null> {
   try {
@@ -102,13 +154,14 @@ export async function getCoachInstructions(athlete: Athlete): Promise<string | n
 
 export async function getTrainingContext(athlete: Athlete): Promise<string> {
   const repo = athlete.memoryRepo;
-  const [coach, zonas, objetivos, metodologia, planGlobal, planActual] = await Promise.all([
+  const [coach, zonas, objetivos, disponibilidad, metodologia, planGlobal, planActual] = await Promise.all([
     getCoachInstructions(athlete),
     readFile(repo, "config/zonas.md"),
-    readFile(repo, "config/objetivos.md"),
+    readFile(repo, "config/objetivos.md").catch(() => ({ content: MISSING_GOAL })),
+    readFile(repo, "config/disponibilidad.md").catch(() => ({ content: MISSING_AVAILABILITY })),
     readFile(repo, "config/metodologia.md").catch(() => ({ content: "_Sin contrato de datos_" })),
     readFile(repo, "plan/plan-global.md").catch(() => ({ content: "_Sin plan global_" })),
-    readFile(repo, "plan/semana-actual.md"),
+    readFile(repo, "plan/semana-actual.md").catch(() => ({ content: "_Sin plan semanal todavía_" })),
   ]);
 
   return [
@@ -116,6 +169,7 @@ export async function getTrainingContext(athlete: Athlete): Promise<string> {
     ...(coach ? [`# INSTRUCCIONES DEL COACH\n\n${coach}`] : []),
     `# ZONAS DE ENTRENAMIENTO\n\n${zonas.content}`,
     `# OBJETIVOS\n\n${objetivos.content}`,
+    `# DISPONIBILIDAD\n\n${disponibilidad.content}`,
     `# METODOLOGÍA Y CONTRATO DE DATOS\n\n${metodologia.content}`,
     `# PLAN GLOBAL\n\n${planGlobal.content}`,
     `# PLAN SEMANA ACTUAL\n\n${planActual.content}`,

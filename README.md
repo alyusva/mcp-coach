@@ -25,6 +25,9 @@ Claude (conversación)
 | Tool | Descripción |
 |------|-------------|
 | `get_training_context` | Lee zonas, objetivos y plan semanal actual |
+| `set_goal` | Guarda el objetivo (`config/objetivos.md`), archivando el anterior |
+| `set_availability` | Guarda la disponibilidad habitual (`config/disponibilidad.md`) |
+| `save_global_plan` | Guarda el plan por bloques (`plan/plan-global.md`), archivando el anterior |
 | `update_weekly_plan` | Escribe nuevo plan; archiva el anterior en `log/` |
 | `append_training_log` | Añade entrada al log semanal (no sobrescribe) |
 | `get_health_context` | Lee el histórico de salud (sueño, HRV, body battery, FC reposo, estrés, training readiness) de las últimas N semanas |
